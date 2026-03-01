@@ -38,11 +38,19 @@ const AdminPanel: React.FC = () => {
     const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false);
     const [showNeuroKey, setShowNeuroKey] = useState<boolean>(false);
 
+    const getScopedGeminiKeyStorageKey = () => {
+        return currentUser?.id ? `gemini_api_key_${currentUser.id}` : 'gemini_api_key';
+    };
+
+    const getScopedNeuroKeyStorageKey = () => {
+        return currentUser?.id ? `neuroapi_api_key_${currentUser.id}` : 'neuroapi_api_key';
+    };
+
     useEffect(() => {
         loadData();
         // Load API keys from localStorage
-        const geminiKey = localStorage.getItem('gemini_api_key') || '';
-        const neuroKey = localStorage.getItem('neuroapi_api_key') || '';
+        const geminiKey = localStorage.getItem(getScopedGeminiKeyStorageKey()) || localStorage.getItem('gemini_api_key') || '';
+        const neuroKey = localStorage.getItem(getScopedNeuroKeyStorageKey()) || localStorage.getItem('neuroapi_api_key') || '';
         setGeminiApiKey(geminiKey);
         setNeuroApiKey(neuroKey);
     }, []);
@@ -206,13 +214,13 @@ const AdminPanel: React.FC = () => {
     };
 
     const handleSaveGeminiKey = () => {
-        localStorage.setItem('gemini_api_key', geminiApiKey);
-        alert('Google Gemini API key saved to localStorage');
+        localStorage.setItem(getScopedGeminiKeyStorageKey(), geminiApiKey);
+        alert('Google Gemini API key saved for current user');
     };
 
     const handleSaveNeuroKey = () => {
-        localStorage.setItem('neuroapi_api_key', neuroApiKey);
-        alert('NeuroAPI key saved to localStorage');
+        localStorage.setItem(getScopedNeuroKeyStorageKey(), neuroApiKey);
+        alert('NeuroAPI key saved for current user');
     };
 
     return (
@@ -288,6 +296,36 @@ const AdminPanel: React.FC = () => {
                                 className="sr-only peer"
                                 checked={systemSettings.showRepeats}
                                 onChange={() => handleToggleSetting('showRepeats')}
+                            />
+                            <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                     </div>
+                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 flex justify-between items-center">
+                        <div>
+                            <div className="text-white font-bold">{t('show_image_search')}</div>
+                            <div className="text-xs text-slate-400">{t('show_image_search_desc')}</div>
+                        </div>
+                         <label className="relative inline-flex items-center cursor-pointer">
+                            <input 
+                                type="checkbox" 
+                                className="sr-only peer"
+                                checked={systemSettings.showImageSearch}
+                                onChange={() => handleToggleSetting('showImageSearch')}
+                            />
+                            <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                     </div>
+                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 flex justify-between items-center">
+                        <div>
+                            <div className="text-white font-bold">{t('show_google_search')}</div>
+                            <div className="text-xs text-slate-400">{t('show_google_search_desc')}</div>
+                        </div>
+                         <label className="relative inline-flex items-center cursor-pointer">
+                            <input 
+                                type="checkbox" 
+                                className="sr-only peer"
+                                checked={systemSettings.showGoogleSearch}
+                                onChange={() => handleToggleSetting('showGoogleSearch')}
                             />
                             <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
                         </label>

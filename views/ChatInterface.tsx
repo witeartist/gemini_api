@@ -20,13 +20,14 @@ const ChatInterface: React.FC = () => {
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const isProImageSelected = selectedModel === ModelType.GEMINI_3_PRO_IMAGE || selectedModel === ModelType.GEMINI_3_1_PRO_IMAGE;
 
     // Effect to enforce Image Mode logic for Pro Image 3
     useEffect(() => {
-        if (selectedModel === ModelType.GEMINI_3_PRO_IMAGE) {
+        if (isProImageSelected) {
             setIsImageMode(true);
         }
-    }, [selectedModel]);
+    }, [isProImageSelected]);
 
     // Load Sessions
     useEffect(() => {
@@ -181,7 +182,7 @@ const ChatInterface: React.FC = () => {
         }
     };
 
-    const isImageModeLocked = selectedModel === ModelType.GEMINI_3_PRO_IMAGE;
+    const isImageModeLocked = isProImageSelected;
 
     return (
         // Adjusted height calculation to ensure input remains on screen (100vh - header - padding)

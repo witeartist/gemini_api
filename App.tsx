@@ -17,7 +17,13 @@ const App: React.FC = () => {
     const [user, setUser] = useState(getCurrentUser());
 
     if (!user) {
-        return <LoginView />;
+        return (
+            <LanguageProvider>
+                <ThemeProvider>
+                    <LoginView />
+                </ThemeProvider>
+            </LanguageProvider>
+        );
     }
 
     return (

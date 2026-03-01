@@ -11,6 +11,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { usePresets } from '../hooks/usePresets';
 import { saveGeneration } from '../services/historyService';
 import { getCurrentUser } from '../services/authService';
+import { getSystemSettings, SystemSettings } from '../services/settingsService';
 
 // JSZip is loaded globally via <script> tag in index.html to avoid Vite build errors
 declare var JSZip: any;
@@ -113,6 +114,7 @@ const CloudBatchProcessor: React.FC = () => {
     const [statusLoadingMap, setStatusLoadingMap] = useState<Record<string, boolean>>({});
 
     const [isDraggingOverGallery, setIsDraggingOverGallery] = useState(false);
+    const [uiSettings, setUiSettings] = useState<SystemSettings>(getSystemSettings());
     const [downloadProgress, setDownloadProgress] = useState<string>("");
     
     // Preview Modal State
@@ -313,6 +315,12 @@ const CloudBatchProcessor: React.FC = () => {
     };
 
     useEffect(() => {
+        const handleSettingsChange = () => setUiSettings(getSystemSettings());
+        window.addEventListener('system-settings-changed', handleSettingsChange);
+        return () => window.removeEventListener('system-settings-changed', handleSettingsChange);
+    }, []);
+
+    useEffect(() => {
         if (!user) return;
         
         const loadJobs = async () => {
@@ -491,7 +499,7 @@ const CloudBatchProcessor: React.FC = () => {
             if (mode === 'image') {
                 const promptsForBatch = parsedPrompts.length > 0 ? parsedPrompts : [''];
                 const copiesPerPrompt = Math.max(1, generationsPerPrompt || 1);
-                const isProImageModel = config.model === ModelType.GEMINI_3_PRO_IMAGE;
+                const isProImageModel = config.model === ModelType.GEMINI_3_PRO_IMAGE || config.model === ModelType.GEMINI_3_1_PRO_IMAGE;
                 const isImageModel = config.model.includes('image');
                 const uploadedResources: { uri: string, mimeType: string, originalName: string }[] = [];
 
@@ -543,6 +551,12 @@ const CloudBatchProcessor: React.FC = () => {
                             };
 
                             if (isProImageModel) {
+                                if (config.useImageSearch && config.model === ModelType.GEMINI_3_1_PRO_IMAGE) {
+                                    requestBody.tools = [{ googleSearch: { searchTypes: { webSearch: {}, imageSearch: {} } } }];
+                                } else {
+                                    requestBody.tools = [{ googleSearch: {} }];
+                                }
+                            } else if (config.useGoogleSearch) {
                                 requestBody.tools = [{ googleSearch: {} }];
                             }
 
@@ -597,6 +611,12 @@ const CloudBatchProcessor: React.FC = () => {
                                 };
 
                                 if (isProImageModel) {
+                                    if (config.useImageSearch && config.model === ModelType.GEMINI_3_1_PRO_IMAGE) {
+                                        requestBody.tools = [{ googleSearch: { searchTypes: { webSearch: {}, imageSearch: {} } } }];
+                                    } else {
+                                        requestBody.tools = [{ googleSearch: {} }];
+                                    }
+                                } else if (config.useGoogleSearch) {
                                     requestBody.tools = [{ googleSearch: {} }];
                                 }
 
@@ -1137,6 +1157,51 @@ const CloudBatchProcessor: React.FC = () => {
                                             {formatText(t('generations_per_prompt_hint'), { count: generationsPerPrompt })}
                                         </p>
                                     </div>
+                                    {uiSettings.showImageSearch && (
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('image_search_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, useImageSearch: !prev.useImageSearch }))}
+                                                className={`
+                                                    w-full max-w-[280px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.useImageSearch 
+                                                        ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white border-blue-400/50 shadow-lg shadow-blue-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    ${config.model !== ModelType.GEMINI_3_1_PRO_IMAGE ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
+                                                `}
+                                                disabled={config.model !== ModelType.GEMINI_3_1_PRO_IMAGE}
+                                                title={t('image_search_tooltip')}
+                                            >
+                                                <i className={`fas fa-search-plus ${config.useImageSearch ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span>{config.useImageSearch ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                    {uiSettings.showGoogleSearch && (
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('google_search_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, useGoogleSearch: !prev.useGoogleSearch }))}
+                                                className={`
+                                                    w-full max-w-[280px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.useGoogleSearch 
+                                                        ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white border-emerald-400/50 shadow-lg shadow-emerald-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    cursor-pointer
+                                                `}
+                                                title={t('google_search_tooltip')}
+                                            >
+                                                <i className={`fas fa-globe ${config.useGoogleSearch ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span>{config.useGoogleSearch ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
                                 </>
                             )}
 

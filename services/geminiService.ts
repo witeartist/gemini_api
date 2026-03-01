@@ -7,8 +7,23 @@ import { downloadBase64ImageWithProof, type ImageProofMetadata } from "./imagePr
 
 export type { ImageProofMetadata } from "./imageProofService";
 
+const getCurrentUserId = (): string | null => {
+    try {
+        const raw = localStorage.getItem('wite_ai_current_user');
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed?.id || null;
+    } catch (e) {
+        return null;
+    }
+};
+
 const getApiKey = (): string => {
-    let key = localStorage.getItem("gemini_api_key");
+    const currentUserId = getCurrentUserId();
+    let key = currentUserId ? localStorage.getItem(`gemini_api_key_${currentUserId}`) : null;
+    if (!key) {
+        key = localStorage.getItem("gemini_api_key");
+    }
     if (!key) {
         try {
             key = process.env.API_KEY;
@@ -29,7 +44,7 @@ const getGeminiClient = () => {
 const getModelFlags = (model: string) => {
     return {
         isImageModel: model.includes('image'),
-        isProImageModel: model === ModelType.GEMINI_3_PRO_IMAGE,
+        isProImageModel: model === ModelType.GEMINI_3_PRO_IMAGE || model === ModelType.GEMINI_3_1_PRO_IMAGE,
     };
 };
 
@@ -183,6 +198,19 @@ const generateContentGoogle = async (
             }
         }
 
+        // Grounding with Google Image Search (only for gemini-3.1-flash-image-preview)
+        if (config.useImageSearch && config.model === ModelType.GEMINI_3_1_PRO_IMAGE) {
+            generateConfig.tools = [
+                { googleSearch: { searchTypes: { webSearch: {}, imageSearch: {} } } }
+            ];
+        }
+        // Grounding with Google Search (works with all models)
+        else if (config.useGoogleSearch) {
+            generateConfig.tools = [
+                { googleSearch: {} }
+            ];
+        }
+
         if (signal?.aborted) throw new Error("Aborted");
 
         const response = await ai.models.generateContent({
@@ -262,6 +290,7 @@ const sendChatMessageGoogle = async (
     }
 
     const isImageModel = effectiveModel.includes('image');
+    const isProImageModel = effectiveModel === ModelType.GEMINI_3_PRO_IMAGE || effectiveModel === ModelType.GEMINI_3_1_PRO_IMAGE;
 
     // 2. Prepare History for SDK
     const sdkHistory = history.map(msg => {
@@ -289,7 +318,7 @@ const sendChatMessageGoogle = async (
     const chatConfig: any = {};
     if (isImageModel) {
         chatConfig.responseModalities = ['TEXT', 'IMAGE'];
-        if (effectiveModel === ModelType.GEMINI_3_PRO_IMAGE) {
+        if (isProImageModel) {
             chatConfig.tools = [{ googleSearch: {} }];
         }
     }

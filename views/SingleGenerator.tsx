@@ -439,21 +439,70 @@ const SingleGenerator: React.FC = () => {
                                 </div>
                             )}
 
-                            {uiSettings.showRepeats && (
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
-                                        {t('repeat_count')}
-                                    </label>
-                                    <NumberStepper
-                                        value={repeatCount}
-                                        onChange={setRepeatCount}
-                                        min={1}
-                                        max={50}
-                                        decreaseAriaLabel="Decrease repeats"
-                                        increaseAriaLabel="Increase repeats"
-                                        inputClassName="bg-slate-800/50 border-slate-700/50 text-white py-2.5 focus:ring-theme-primary focus:outline-none"
-                                        buttonClassName="bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/60"
-                                    />
+                            {(uiSettings.showRepeats || uiSettings.showImageSearch || uiSettings.showGoogleSearch) && (
+                                <div className="flex gap-3 items-end">
+                                    {uiSettings.showRepeats && (
+                                        <div className={(uiSettings.showImageSearch || uiSettings.showGoogleSearch) ? "flex-1 min-w-0" : "w-full"}>
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('repeat_count')}
+                                            </label>
+                                            <NumberStepper
+                                                value={repeatCount}
+                                                onChange={setRepeatCount}
+                                                min={1}
+                                                max={50}
+                                                decreaseAriaLabel="Decrease repeats"
+                                                increaseAriaLabel="Increase repeats"
+                                                inputClassName="bg-slate-800/50 border-slate-700/50 text-white py-2.5 focus:ring-theme-primary focus:outline-none"
+                                                buttonClassName="bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/60"
+                                            />
+                                        </div>
+                                    )}
+                                    {uiSettings.showImageSearch && (
+                                        <div className="shrink-0">
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('image_search_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, useImageSearch: !prev.useImageSearch }))}
+                                                className={`
+                                                    flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.useImageSearch 
+                                                        ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white border-blue-400/50 shadow-lg shadow-blue-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    ${config.model !== ModelType.GEMINI_3_1_PRO_IMAGE ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
+                                                `}
+                                                disabled={config.model !== ModelType.GEMINI_3_1_PRO_IMAGE}
+                                                title={t('image_search_tooltip')}
+                                            >
+                                                <i className={`fas fa-search-plus ${config.useImageSearch ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span className="whitespace-nowrap">{config.useImageSearch ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                    {uiSettings.showGoogleSearch && (
+                                        <div className="shrink-0">
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('google_search_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, useGoogleSearch: !prev.useGoogleSearch }))}
+                                                className={`
+                                                    flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.useGoogleSearch 
+                                                        ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white border-emerald-400/50 shadow-lg shadow-emerald-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    cursor-pointer
+                                                `}
+                                                title={t('google_search_tooltip')}
+                                            >
+                                                <i className={`fas fa-globe ${config.useGoogleSearch ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span className="whitespace-nowrap">{config.useGoogleSearch ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

@@ -13,6 +13,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { usePresets } from '../hooks/usePresets';
 import { saveGeneration } from '../services/historyService';
 import { getCurrentUser } from '../services/authService';
+import { getSystemSettings, SystemSettings } from '../services/settingsService';
 
 declare var JSZip: any;
 
@@ -62,11 +63,19 @@ const BatchProcessor: React.FC = () => {
     const [filesPerRequest, setFilesPerRequest] = useState<number>(1);
     const [textGroups, setTextGroups] = useState<BatchTextGroup[]>([]);
     const [generationsPerPrompt, setGenerationsPerPrompt] = useState<number>(1);
+    const [uiSettings, setUiSettings] = useState<SystemSettings>(getSystemSettings());
 
     const [isBatchRunning, setIsBatchRunning] = useState(false);
     const [viewingImage, setViewingImage] = useState<string | null>(null);
     const [compareData, setCompareData] = useState<{original: string, result: string} | null>(null);
     const [showErrorsOnly, setShowErrorsOnly] = useState(false);
+
+    // Listen for settings changes
+    useEffect(() => {
+        const handleSettingsChange = () => setUiSettings(getSystemSettings());
+        window.addEventListener('system-settings-changed', handleSettingsChange);
+        return () => window.removeEventListener('system-settings-changed', handleSettingsChange);
+    }, []);
 
     // Load state
     useEffect(() => {
@@ -513,17 +522,22 @@ const BatchProcessor: React.FC = () => {
             )}
 
             {/* Config & Upload Section */}
-            <div className="bg-slate-900/60 backdrop-blur-md p-8 rounded-3xl border border-slate-700/50 shadow-xl">
-                <div className="flex justify-between items-center mb-8">
-                     <div className="flex items-center gap-4">
+            <div className="bg-slate-800/50 backdrop-blur-sm p-6 lg:p-7 rounded-2xl border border-slate-700">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-7">
+                    <div className="flex items-center gap-4">
                         <div className="bg-blue-600/20 p-2 rounded-lg">
                              <i className="fas fa-layer-group text-blue-500"></i>
                         </div>
-                        <h2 className="text-xl font-bold text-white">{t('batch_queue_title')}</h2>
-                     </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-white">{t('batch_queue_title')}</h2>
+                            <p className="text-xs text-slate-400 mt-1">
+                                {mode === 'image' ? t('cloud_mode_image_desc') : t('cloud_mode_text_desc')}
+                            </p>
+                        </div>
+                    </div>
                      
                      {/* Mode Switcher */}
-                     <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
+                     <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 self-start lg:self-auto">
                         <button 
                             onClick={() => setMode('image')}
                             className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${mode === 'image' ? 'bg-theme-primary text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
@@ -539,70 +553,127 @@ const BatchProcessor: React.FC = () => {
                      </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-                    <div className="md:col-span-1 space-y-4">
-                        <Select 
-                            label={t('model_label')}
-                            options={MODELS} 
-                            value={config.model}
-                            onChange={e => setConfig({ ...config, model: e.target.value as ModelType })}
-                        />
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-7 mb-7">
+                    <div className="xl:col-span-5 bg-slate-900/40 border border-slate-700 rounded-2xl p-5">
+                        <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                            <i className="fas fa-sliders-h text-blue-400"></i>
+                            {t('cloud_section_model')}
+                        </h3>
+
+                        <div className="space-y-5">
+                            <Select 
+                                label={t('model_label')}
+                                options={MODELS} 
+                                value={config.model}
+                                onChange={e => setConfig({ ...config, model: e.target.value as ModelType })}
+                            />
                          
-                         {mode === 'image' && (
-                            <>
-                                <Select 
-                                    label={t('resolution_label')}
-                                    options={RESOLUTIONS} 
-                                    value={config.resolution}
-                                    onChange={e => setConfig({ ...config, resolution: e.target.value })}
-                                />
-                                <Select 
-                                    label={t('ar_label')}
-                                    options={translatedAspectRatios} 
-                                    value={config.aspectRatio}
-                                    onChange={e => setConfig({ ...config, aspectRatio: e.target.value })}
-                                />
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('generations_per_prompt_label')}</label>
-                                    <NumberStepper
-                                        value={generationsPerPrompt}
-                                        onChange={setGenerationsPerPrompt}
-                                        min={1}
-                                        max={10}
-                                        inputClassName="bg-slate-800/50 border-slate-700/50 text-white focus:ring-blue-500/50"
-                                        buttonClassName="bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/60"
-                                        decreaseAriaLabel="Decrease generations per prompt"
-                                        increaseAriaLabel="Increase generations per prompt"
+                            {mode === 'image' && (
+                                <>
+                                    <Select 
+                                        label={t('resolution_label')}
+                                        options={RESOLUTIONS} 
+                                        value={config.resolution}
+                                        onChange={e => setConfig({ ...config, resolution: e.target.value })}
                                     />
-                                    <p className="text-[10px] text-slate-500 mt-1 ml-1">
-                                        {formatText(t('generations_per_prompt_hint'), { count: Math.max(1, generationsPerPrompt || 1) })}
-                                    </p>
+                                    <Select 
+                                        label={t('ar_label')}
+                                        options={translatedAspectRatios} 
+                                        value={config.aspectRatio}
+                                        onChange={e => setConfig({ ...config, aspectRatio: e.target.value })}
+                                    />
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('generations_per_prompt_label')}</label>
+                                        <NumberStepper
+                                            value={generationsPerPrompt}
+                                            onChange={setGenerationsPerPrompt}
+                                            min={1}
+                                            max={10}
+                                            className="max-w-[280px]"
+                                            decreaseAriaLabel="Decrease generations per prompt"
+                                            increaseAriaLabel="Increase generations per prompt"
+                                        />
+                                        <p className="text-[10px] text-slate-500 mt-1 ml-1">
+                                            {formatText(t('generations_per_prompt_hint'), { count: Math.max(1, generationsPerPrompt || 1) })}
+                                        </p>
+                                    </div>
+                                    {uiSettings.showImageSearch && (
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('image_search_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, useImageSearch: !prev.useImageSearch }))}
+                                                className={`
+                                                    w-full max-w-[280px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.useImageSearch 
+                                                        ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white border-blue-400/50 shadow-lg shadow-blue-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    ${config.model !== ModelType.GEMINI_3_1_PRO_IMAGE ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
+                                                `}
+                                                disabled={config.model !== ModelType.GEMINI_3_1_PRO_IMAGE}
+                                                title={t('image_search_tooltip')}
+                                            >
+                                                <i className={`fas fa-search-plus ${config.useImageSearch ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span>{config.useImageSearch ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                    {uiSettings.showGoogleSearch && (
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('google_search_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, useGoogleSearch: !prev.useGoogleSearch }))}
+                                                className={`
+                                                    w-full max-w-[280px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.useGoogleSearch 
+                                                        ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white border-emerald-400/50 shadow-lg shadow-emerald-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    cursor-pointer
+                                                `}
+                                                title={t('google_search_tooltip')}
+                                            >
+                                                <i className={`fas fa-globe ${config.useGoogleSearch ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span>{config.useGoogleSearch ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {mode === 'text' && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('files_per_request_label')}</label>
+                                    <NumberStepper
+                                        value={filesPerRequest}
+                                        onChange={setFilesPerRequest}
+                                        min={1}
+                                        max={50}
+                                        className="max-w-[280px]"
+                                        decreaseAriaLabel="Decrease files per request"
+                                        increaseAriaLabel="Increase files per request"
+                                    />
+                                    <p className="text-[10px] text-slate-500 mt-1 ml-1">{t('files_per_request_hint')}</p>
                                 </div>
-                            </>
-                         )}
+                            )}
+                        </div>
+                    </div>
 
-                         {mode === 'text' && (
-                             <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('files_per_request_label')}</label>
-                                <NumberStepper
-                                    value={filesPerRequest}
-                                    onChange={setFilesPerRequest}
-                                    min={1}
-                                    max={50}
-                                    inputClassName="bg-slate-800/50 border-slate-700/50 text-white focus:ring-blue-500/50"
-                                    buttonClassName="bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/60"
-                                    decreaseAriaLabel="Decrease files per request"
-                                    increaseAriaLabel="Increase files per request"
-                                />
-                                <p className="text-[10px] text-slate-500 mt-1 ml-1">{t('files_per_request_hint')}</p>
-                             </div>
-                         )}
+                    <div className="xl:col-span-7 bg-slate-900/40 border border-slate-700 rounded-2xl p-5">
+                        <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                            <i className="fas fa-pen-ruler text-violet-400"></i>
+                            {t('cloud_section_prompts')}
+                        </h3>
 
-                        <div className="mt-4">
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('preset_label')}</label>
-                            <div className="relative">
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('preset_label')}</label>
                                 <select 
-                                    className="w-full bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 text-slate-100 rounded-xl px-4 py-3 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg px-4 py-3 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     onChange={handlePresetChange}
                                     defaultValue=""
                                 >
@@ -611,30 +682,22 @@ const BatchProcessor: React.FC = () => {
                                         <option key={p.name} value={p.name}>{p.name}</option>
                                     ))}
                                 </select>
-                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
-                                    <i className="fas fa-chevron-down text-xs"></i>
-                                </div>
                             </div>
-                        </div>
-                    </div>
-                    <div className="md:col-span-2 flex flex-col gap-4">
-                         <TextArea 
-                            label={t('system_instr_label')} 
-                            value={config.systemPrompt}
-                            onChange={e => setConfig({ ...config, systemPrompt: e.target.value })}
-                            className="flex-1"
-                            rows={4}
-                        />
-                        <div>
+
+                            <TextArea 
+                                label={t('system_instr_label')} 
+                                value={config.systemPrompt}
+                                onChange={e => setConfig({ ...config, systemPrompt: e.target.value })}
+                                className="flex-1"
+                            />
                             <TextArea
                                 label={t('user_prompt_label')}
                                 value={config.userPrompt}
                                 onChange={e => setConfig({ ...config, userPrompt: e.target.value })}
                                 className="flex-1"
-                                rows={6}
                                 placeholder={t('batch_prompts_placeholder')}
                             />
-                            <p className="text-[11px] text-slate-500 mt-2 ml-1">
+                            <p className="text-[11px] text-slate-500 -mt-3 ml-1">
                                 {config.userPrompt.trim()
                                     ? (mode === 'image'
                                         ? formatText(t('local_batch_prompts_hint_image'), {
@@ -651,37 +714,75 @@ const BatchProcessor: React.FC = () => {
                         </div>
                     </div>
                 </div>
-                
-                {/* Uploader Section */}
-                {mode === 'image' ? (
-                     <FileUploader onFilesSelected={handleFilesSelect} multiple className="py-10" />
-                ) : (
-                     <FileUploader 
-                        onFilesSelected={handleFilesSelect} 
-                        multiple 
-                        accept=".csv,.txt,.json,.md,.xml,.js,.ts,.py" 
-                        label="Drag & drop text or CSV files"
-                        className="py-10 border-blue-500/30" 
-                    />
-                )}
+
+                {/* Input Files & Launch Section */}
+                <div className="bg-slate-800/50 backdrop-blur-sm p-6 rounded-2xl border border-slate-700 mb-7">
+                    <div className="mb-4">
+                        <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+                            <i className="fas fa-inbox text-emerald-400"></i>
+                            {t('input_files')}
+                        </h3>
+                    </div>
+
+                    {mode === 'image' ? (
+                        <FileUploader onFilesSelected={handleFilesSelect} multiple className="py-10" />
+                    ) : (
+                        <FileUploader 
+                            onFilesSelected={handleFilesSelect} 
+                            multiple 
+                            accept=".csv,.txt,.json,.md,.xml,.js,.ts,.py" 
+                            label="Drag & drop text or CSV files"
+                            className="py-10 border-blue-500/30" 
+                        />
+                    )}
+                </div>
+
+                {/* Summary Bar */}
+                <div className="bg-slate-900/40 border border-slate-700 rounded-2xl p-5">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+                        <div>
+                            <h3 className="text-sm font-semibold text-white mb-2">{t('cloud_summary_title')}</h3>
+                            <div className="flex flex-wrap gap-2 text-xs">
+                                <span className="px-2 py-1 rounded-md border border-slate-700 bg-slate-800/80 text-slate-300">
+                                    {t('cloud_summary_files')}: <strong className="text-white">{mode === 'image' ? files.filter(f => f.status === 'pending' || f.status === 'failed').length : pendingTextFiles.length}</strong>
+                                </span>
+                                <span className="px-2 py-1 rounded-md border border-slate-700 bg-slate-800/80 text-slate-300">
+                                    {t('cloud_summary_prompts')}: <strong className="text-white">{promptsCount}</strong>
+                                </span>
+                                <span className="px-2 py-1 rounded-md border border-slate-700 bg-slate-800/80 text-slate-300">
+                                    {t('cloud_summary_requests')}: <strong className="text-white">{mode === 'image' ? localImageRequestsEstimate : localTextGroupsEstimate}</strong>
+                                </span>
+                                <span className={`px-2 py-1 rounded-md border ${!hasItemsToProcess ? 'border-amber-700/50 bg-amber-900/20 text-amber-300' : 'border-emerald-700/50 bg-emerald-900/20 text-emerald-300'}`}>
+                                    {!hasItemsToProcess ? t('cloud_not_ready_badge') : t('cloud_ready_badge')}
+                                </span>
+                            </div>
+                        </div>
+
+                        <Button 
+                            variant="success" 
+                            onClick={runBatch} 
+                            isLoading={isBatchRunning} 
+                            disabled={!hasItemsToProcess}
+                            className="min-w-[180px]"
+                            icon="fa-play"
+                        >
+                            {t('start_batch')}
+                        </Button>
+                    </div>
+                </div>
                 
 
                 {/* --- Staging Queue / Processing List --- */}
                 {mode === 'image' && pendingList.length > 0 && (
-                    <div className="mt-8 border-t border-slate-700/50 pt-8 animate-fade-in">
+                    <div className="mt-7 border-t border-slate-700/50 pt-7 animate-fade-in">
                          <div className="flex justify-between items-center mb-6">
                             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Queue ({pendingList.length})</h3>
-                            <div className="flex items-center gap-3">
-                                <button
-                                    onClick={() => setShowErrorsOnly(prev => !prev)}
-                                    className={`text-[11px] px-3 py-2 rounded-lg border transition-colors ${showErrorsOnly ? 'bg-red-500/15 border-red-500/40 text-red-300' : 'bg-slate-800/70 border-slate-700 text-slate-300 hover:text-white'}`}
-                                >
-                                    {t('local_filter_errors')}
-                                </button>
-                                <Button variant="success" onClick={runBatch} isLoading={isBatchRunning} icon="fa-play" className="px-8 shadow-xl shadow-emerald-900/30">
-                                    {t('start_batch')}
-                                </Button>
-                            </div>
+                            <button
+                                onClick={() => setShowErrorsOnly(prev => !prev)}
+                                className={`text-[11px] px-3 py-2 rounded-lg border transition-colors ${showErrorsOnly ? 'bg-red-500/15 border-red-500/40 text-red-300' : 'bg-slate-800/70 border-slate-700 text-slate-300 hover:text-white'}`}
+                            >
+                                {t('local_filter_errors')}
+                            </button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-80 overflow-y-auto custom-scrollbar p-1">
                             {pendingList.map(item => (
@@ -712,7 +813,7 @@ const BatchProcessor: React.FC = () => {
                 )}
 
                 {mode === 'text' && (pendingTextFiles.length > 0 || textGroups.length > 0) && (
-                    <div className="mt-8 border-t border-slate-700/50 pt-8 animate-fade-in">
+                    <div className="mt-7 border-t border-slate-700/50 pt-7 animate-fade-in">
                         <div className="flex justify-between items-center mb-6">
                             <div className="flex flex-col">
                                 <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">
@@ -722,17 +823,12 @@ const BatchProcessor: React.FC = () => {
                                 <span className="text-xs text-slate-500">Will process in chunks of {filesPerRequest}</span>
                             </div>
 
-                            <div className="flex items-center gap-3">
-                                <button
-                                    onClick={() => setShowErrorsOnly(prev => !prev)}
-                                    className={`text-[11px] px-3 py-2 rounded-lg border transition-colors ${showErrorsOnly ? 'bg-red-500/15 border-red-500/40 text-red-300' : 'bg-slate-800/70 border-slate-700 text-slate-300 hover:text-white'}`}
-                                >
-                                    {t('local_filter_errors')}
-                                </button>
-                                <Button variant="success" onClick={runBatch} isLoading={isBatchRunning} disabled={!hasItemsToProcess} icon="fa-play" className="px-8 shadow-xl shadow-emerald-900/30">
-                                    {t('start_batch')}
-                                </Button>
-                            </div>
+                            <button
+                                onClick={() => setShowErrorsOnly(prev => !prev)}
+                                className={`text-[11px] px-3 py-2 rounded-lg border transition-colors ${showErrorsOnly ? 'bg-red-500/15 border-red-500/40 text-red-300' : 'bg-slate-800/70 border-slate-700 text-slate-300 hover:text-white'}`}
+                            >
+                                {t('local_filter_errors')}
+                            </button>
                         </div>
 
                         {/* Staging List (Simple) */}

@@ -6,6 +6,8 @@ export type AppTheme = 'default' | 'raspberry' | 'green';
 export interface SystemSettings {
     showCreativity: boolean;
     showRepeats: boolean;
+    showImageSearch: boolean;
+    showGoogleSearch: boolean;
     theme: AppTheme;
     language?: 'en' | 'ru';
     newYearMode: boolean;
@@ -58,11 +60,14 @@ export const getSystemSettings = (): SystemSettings => {
             return {
                 showCreativity: true,
                 showRepeats: true,
+                showImageSearch: false,
+                showGoogleSearch: false,
                 theme: 'default',
                 language: 'en',
                 newYearMode: false,
                 safetySettings: DEFAULT_SAFETY,
                 mediaResolution: MediaResolution.HIGH, // Default to High
+                apiProvider: ApiProvider.GOOGLE, // Default to Google
                 externalGalleryHiddenUsers: [],
                 ...parsed
             };
@@ -75,6 +80,8 @@ export const getSystemSettings = (): SystemSettings => {
     const defaults: SystemSettings = { 
         showCreativity: true, 
         showRepeats: true,
+        showImageSearch: false,
+        showGoogleSearch: false,
         theme: 'default',
         language: 'en',
         newYearMode: false,

@@ -435,15 +435,54 @@ app.get('/api/admin/stats', async (req, res) => {
 // 5. User Persistence
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
+const normalizeUsersData = (raw) => {
+    if (Array.isArray(raw)) {
+        return raw.filter(user => user && typeof user === 'object' && user.id && user.username);
+    }
+
+    if (raw && typeof raw === 'object' && raw.id && raw.username) {
+        return [raw];
+    }
+
+    return [];
+};
+
+const loadUsers = async () => {
+    if (!await fs.pathExists(USERS_FILE)) {
+        return [];
+    }
+
+    const raw = await fs.readJson(USERS_FILE);
+    const users = normalizeUsersData(raw);
+
+    if (!Array.isArray(raw)) {
+        await fs.writeJson(USERS_FILE, users, { spaces: 2 });
+    }
+
+    return users;
+};
+
+const upsertUser = (users, incomingUser) => {
+    if (!incomingUser || typeof incomingUser !== 'object' || !incomingUser.id || !incomingUser.username) {
+        return users;
+    }
+
+    const userIndex = users.findIndex(user => user.id === incomingUser.id);
+
+    if (userIndex === -1) {
+        return [...users, incomingUser];
+    }
+
+    const mergedUser = { ...users[userIndex], ...incomingUser };
+    const updatedUsers = [...users];
+    updatedUsers[userIndex] = mergedUser;
+    return updatedUsers;
+};
+
 app.get('/api/users', async (req, res) => {
     try {
-        if (await fs.pathExists(USERS_FILE)) {
-            const users = await fs.readJson(USERS_FILE);
-            res.json(users);
-        } else {
-            // Return empty array (or default admin handled by client if empty)
-            res.json([]);
-        }
+        const users = await loadUsers();
+        res.json(users);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -451,8 +490,17 @@ app.get('/api/users', async (req, res) => {
 
 app.post('/api/users', async (req, res) => {
     try {
-        const users = req.body;
-        await fs.writeJson(USERS_FILE, users, { spaces: 2 });
+        const incoming = req.body;
+        let usersToSave = [];
+
+        if (Array.isArray(incoming)) {
+            usersToSave = normalizeUsersData(incoming);
+        } else {
+            const existingUsers = await loadUsers();
+            usersToSave = upsertUser(existingUsers, incoming);
+        }
+
+        await fs.writeJson(USERS_FILE, usersToSave, { spaces: 2 });
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -468,11 +516,10 @@ app.post('/api/login', async (req, res) => {
             return res.status(400).json({ error: 'Username and password required' });
         }
 
-        if (!await fs.pathExists(USERS_FILE)) {
+        const users = await loadUsers();
+        if (users.length === 0) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
-
-        const users = await fs.readJson(USERS_FILE);
 
         // Find user with matching username (case-insensitive)
         const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());

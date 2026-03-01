@@ -19,6 +19,13 @@ dist-ssr
 
 # Secrets
 data/global_api_key.txt
+data/
+
+# Old data files
+old data/
+
+# Local knowledge base
+FAQ/
 
 # Editor directories and files
 .vscode/*

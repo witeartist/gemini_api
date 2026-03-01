@@ -1,24 +1,44 @@
 
 import React, { useState } from 'react';
 import Button from '../components/ui/Button';
-import { login } from '../services/authService';
+import { login, getReturnAccountId, clearReturnAccount, switchAccount, getSavedAccounts } from '../services/authService';
 import { syncSystemSettings } from '../services/settingsService';
 import { initializeUsers } from '../services/authService';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const LoginView: React.FC = () => {
+    const { t } = useLanguage();
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [isGoingBack, setIsGoingBack] = useState(false);
+
+    const returnAccountId = getReturnAccountId();
+    const returnAccount = returnAccountId ? getSavedAccounts().find(a => a.id === returnAccountId) : null;
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         const user = await login(username, password);
         if (user) {
-            // Load system settings and user preferences from server
+            clearReturnAccount();
             await syncSystemSettings();
             window.location.reload();
         } else {
-            setError("Invalid credentials");
+            setError(t('login_invalid_credentials'));
+        }
+    };
+
+    const handleGoBack = async () => {
+        if (!returnAccountId) return;
+        setIsGoingBack(true);
+        const success = await switchAccount(returnAccountId);
+        if (success) {
+            clearReturnAccount();
+            window.location.reload();
+        } else {
+            setError(t('switch_account_failed'));
+            clearReturnAccount();
+            setIsGoingBack(false);
         }
     };
 
@@ -30,12 +50,30 @@ const LoginView: React.FC = () => {
             <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-600/20 rounded-full blur-[100px] animate-pulse-slow" style={{animationDelay: '1s'}}></div>
 
             <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-10 rounded-3xl w-full max-w-md shadow-2xl relative z-10 animate-fade-in">
+                {/* Back Button */}
+                {returnAccount && (
+                    <button
+                        onClick={handleGoBack}
+                        disabled={isGoingBack}
+                        className="absolute top-5 left-5 flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/50 transition-all text-sm group"
+                    >
+                        {isGoingBack ? (
+                            <i className="fas fa-circle-notch fa-spin text-xs"></i>
+                        ) : (
+                            <i className="fas fa-arrow-left text-xs group-hover:-translate-x-0.5 transition-transform"></i>
+                        )}
+                        <span className="hidden sm:inline">{returnAccount.username}</span>
+                    </button>
+                )}
+
                 <div className="text-center mb-10">
                     <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl mb-6 shadow-lg shadow-blue-500/30">
                          <i className="fas fa-robot text-white text-3xl"></i>
                     </div>
                     <h1 className="text-4xl font-bold text-white tracking-tight">Wite AI</h1>
-                    <p className="text-slate-400 mt-3 font-medium">GenAI Studio Access</p>
+                    <p className="text-slate-400 mt-3 font-medium">
+                        {returnAccount ? t('login_add_account_subtitle') : t('login_subtitle')}
+                    </p>
                 </div>
 
                 {error && (
@@ -47,33 +85,33 @@ const LoginView: React.FC = () => {
 
                 <form onSubmit={handleLogin} className="space-y-6">
                     <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Username</label>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('login_username')}</label>
                         <input 
                             type="text" 
                             className="w-full bg-slate-800/50 border border-slate-700/50 text-white rounded-xl px-5 py-4 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all placeholder-slate-600"
                             value={username}
                             onChange={e => setUsername(e.target.value)}
-                            placeholder="Enter username"
+                            placeholder={t('login_username_placeholder')}
                         />
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Password</label>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">{t('login_password')}</label>
                         <input 
                             type="password" 
                             className="w-full bg-slate-800/50 border border-slate-700/50 text-white rounded-xl px-5 py-4 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all placeholder-slate-600"
                             value={password}
                             onChange={e => setPassword(e.target.value)}
-                            placeholder="Enter password"
+                            placeholder={t('login_password_placeholder')}
                         />
                     </div>
                     <Button type="submit" className="w-full py-4 text-lg shadow-xl shadow-blue-900/20 mt-4">
-                        Sign In <i className="fas fa-arrow-right ml-2 text-sm"></i>
+                        {t('login_sign_in')} <i className="fas fa-arrow-right ml-2 text-sm"></i>
                     </Button>
                 </form>
                 
                 <div className="mt-8 text-center">
                     <p className="text-xs text-slate-500">
-                        Restricted Access System
+                        {t('login_restricted_access')}
                     </p>
                 </div>
             </div>

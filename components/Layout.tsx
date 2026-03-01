@@ -4,7 +4,7 @@ import { TabId, HarmCategory, HarmBlockThreshold, MediaResolution } from '../typ
 import Button from './ui/Button';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { logout, getCurrentUser } from '../services/authService';
+import { logout, logoutForAccountSwitch, getCurrentUser, getSavedAccounts, switchAccount, removeSavedAccount, SavedAccount } from '../services/authService';
 import { getSystemSettings, saveSystemSettings } from '../services/settingsService';
 import { SAFETY_CATEGORIES, SAFETY_THRESHOLDS, MEDIA_RESOLUTIONS_OPTIONS } from '../constants';
 
@@ -17,17 +17,56 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => {
     const [showSettings, setShowSettings] = useState(false);
     const [showApps, setShowApps] = useState(false);
+    const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
     const [apiKey, setApiKey] = useState('');
     const { t, language, setLanguage } = useLanguage();
     const { theme, setTheme, newYearMode, setNewYearMode } = useTheme();
     const user = getCurrentUser();
+    const savedAccounts = getSavedAccounts();
+    const otherAccounts = savedAccounts.filter(a => a.id !== user?.id);
+
+    const handleSwitchAccount = async (account: SavedAccount) => {
+        const success = await switchAccount(account.id);
+        if (success) {
+            window.location.reload();
+        } else {
+            alert(t('switch_account_failed'));
+        }
+    };
+
+    const handleRemoveSavedAccount = (accountId: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        removeSavedAccount(accountId);
+        setShowAccountSwitcher(false);
+    };
+
+    // Close dropdowns on outside click
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            if (showAccountSwitcher && !target.closest('[data-account-switcher]')) {
+                setShowAccountSwitcher(false);
+            }
+            if (showApps && !target.closest('[data-apps-menu]')) {
+                setShowApps(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showAccountSwitcher, showApps]);
     
     // Settings State
     const [safetySettings, setSafetySettings] = useState(getSystemSettings().safetySettings);
     const [mediaResolution, setMediaResolution] = useState(getSystemSettings().mediaResolution);
 
+    const getUserScopedGeminiKeyStorageKey = () => {
+        return user?.id ? `gemini_api_key_${user.id}` : 'gemini_api_key';
+    };
+
     useEffect(() => {
-        const storedKey = localStorage.getItem("gemini_api_key");
+        const scopedKey = localStorage.getItem(getUserScopedGeminiKeyStorageKey());
+        const legacyKey = localStorage.getItem("gemini_api_key");
+        const storedKey = scopedKey || legacyKey;
         if (storedKey) setApiKey(storedKey);
         setSafetySettings(getSystemSettings().safetySettings);
         setMediaResolution(getSystemSettings().mediaResolution);
@@ -36,12 +75,19 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
     const saveSettings = () => {
         // Save API Key
         let cleanKey = apiKey;
+        const scopedStorageKey = getUserScopedGeminiKeyStorageKey();
         if (cleanKey) {
              cleanKey = cleanKey.replace(/[^\x20-\x7E]/g, '').trim();
-             localStorage.setItem("gemini_api_key", cleanKey);
+             localStorage.setItem(scopedStorageKey, cleanKey);
+             if (!user?.id) {
+                 localStorage.setItem("gemini_api_key", cleanKey);
+             }
              setApiKey(cleanKey);
         } else {
-            localStorage.removeItem("gemini_api_key");
+            localStorage.removeItem(scopedStorageKey);
+            if (!user?.id) {
+                localStorage.removeItem("gemini_api_key");
+            }
         }
 
         // Save Safety & Media Settings
@@ -98,7 +144,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
                             <span className="font-bold text-white text-lg tracking-tight hidden lg:block">Wite AI</span>
                             
                             {/* Apps Button */}
-                            <div className="relative">
+                            <div className="relative" data-apps-menu>
                                 <button 
                                     onClick={() => setShowApps(!showApps)} 
                                     className={`ml-2 w-8 h-8 rounded-lg flex items-center justify-center transition-all ${showApps ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -179,14 +225,98 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
                             >
                                 <i className="fas fa-cog"></i>
                             </button>
-                            
-                            <button 
-                                onClick={logout} 
-                                className="w-9 h-9 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 flex items-center justify-center text-red-400 hover:text-red-300 transition-all hover:scale-105 active:scale-95" 
-                                title="Sign out"
-                            >
-                                <i className="fas fa-sign-out-alt"></i>
-                            </button>
+
+                            {/* Account Switcher */}
+                            <div className="relative" data-account-switcher>
+                                <button 
+                                    onClick={() => setShowAccountSwitcher(!showAccountSwitcher)}
+                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all hover:scale-105 active:scale-95 ${showAccountSwitcher ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800/50 border-slate-700/50 text-slate-300 hover:bg-slate-700 hover:text-white'}`}
+                                    title={user?.username}
+                                >
+                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${user?.role === 'admin' ? 'bg-gradient-to-br from-purple-500 to-indigo-600' : 'bg-gradient-to-br from-blue-500 to-cyan-600'}`}>
+                                        {user?.username?.charAt(0).toUpperCase()}
+                                    </div>
+                                    <span className="text-xs font-medium hidden lg:inline max-w-[80px] truncate">{user?.username}</span>
+                                    {otherAccounts.length > 0 && (
+                                        <i className={`fas fa-chevron-down text-[8px] transition-transform ${showAccountSwitcher ? 'rotate-180' : ''}`}></i>
+                                    )}
+                                </button>
+
+                                {showAccountSwitcher && (
+                                    <div className="absolute top-full right-0 mt-3 w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl p-3 z-50 animate-fade-in origin-top-right">
+                                        {/* Current Account */}
+                                        <div className="px-3 py-2 mb-2">
+                                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">{t('current_account')}</div>
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0 ${user?.role === 'admin' ? 'bg-gradient-to-br from-purple-500 to-indigo-600' : 'bg-gradient-to-br from-blue-500 to-cyan-600'}`}>
+                                                    {user?.username?.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="text-sm font-semibold text-white truncate">{user?.username}</div>
+                                                    <div className="text-[10px] text-slate-400 capitalize">{user?.role}</div>
+                                                </div>
+                                                <div className="ml-auto shrink-0">
+                                                    <span className="w-2 h-2 rounded-full bg-emerald-400 block"></span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Other Accounts */}
+                                        {otherAccounts.length > 0 && (
+                                            <>
+                                                <div className="border-t border-slate-700/50 my-2"></div>
+                                                <div className="px-3 py-1">
+                                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">{t('switch_to')}</div>
+                                                </div>
+                                                {otherAccounts.map(account => (
+                                                    <button
+                                                        key={account.id}
+                                                        onClick={() => handleSwitchAccount(account)}
+                                                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 transition-all group"
+                                                    >
+                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0 ${account.role === 'admin' ? 'bg-gradient-to-br from-purple-500/70 to-indigo-600/70' : 'bg-gradient-to-br from-blue-500/70 to-cyan-600/70'}`}>
+                                                            {account.username.charAt(0).toUpperCase()}
+                                                        </div>
+                                                        <div className="min-w-0 text-left flex-1">
+                                                            <div className="text-sm font-medium text-slate-300 group-hover:text-white truncate">{account.username}</div>
+                                                            <div className="text-[10px] text-slate-500 capitalize">{account.role}</div>
+                                                        </div>
+                                                        <button
+                                                            onClick={(e) => handleRemoveSavedAccount(account.id, e)}
+                                                            className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                                                            title={t('remove_saved_account')}
+                                                        >
+                                                            <i className="fas fa-times text-[10px]"></i>
+                                                        </button>
+                                                    </button>
+                                                ))}
+                                            </>
+                                        )}
+
+                                        {/* Add Account / Logout */}
+                                        <div className="border-t border-slate-700/50 mt-2 pt-2 space-y-1">
+                                            <button
+                                                onClick={() => { logoutForAccountSwitch(); }}
+                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+                                            >
+                                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-dashed border-slate-600 flex items-center justify-center">
+                                                    <i className="fas fa-plus text-[10px] text-slate-500"></i>
+                                                </div>
+                                                <span className="text-sm">{t('add_account')}</span>
+                                            </button>
+                                            <button
+                                                onClick={logout}
+                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all"
+                                            >
+                                                <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center">
+                                                    <i className="fas fa-sign-out-alt text-xs"></i>
+                                                </div>
+                                                <span className="text-sm">{t('sign_out')}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

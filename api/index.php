@@ -771,11 +771,14 @@ function getSystemSettings() {
         $defaults = [
             'showCreativity' => true,
             'showRepeats' => true,
+            'showImageSearch' => false,
+            'showGoogleSearch' => false,
             'theme' => 'default',
             'language' => 'en',
             'newYearMode' => false,
             'safetySettings' => [],
             'mediaResolution' => 'HIGH',
+            'apiProvider' => 'google',
             'externalGalleryHiddenUsers' => []
         ];
         echo json_encode($defaults);

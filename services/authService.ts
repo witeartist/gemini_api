@@ -2,6 +2,8 @@ import { User, ModelType } from "../types";
 
 const USERS_KEY = 'wite_ai_users';
 const CURRENT_USER_KEY = 'wite_ai_current_user';
+const SAVED_ACCOUNTS_KEY = 'wite_ai_saved_accounts';
+const RETURN_ACCOUNT_KEY = 'wite_ai_return_account';
 
 // SHA256 hash helper
 export const sha256 = async (message: string): Promise<string> => {
@@ -94,6 +96,7 @@ export const login = async (username: string, password: string): Promise<User | 
             if (data.success && data.user) {
                 const sessionUser = data.user;
                 localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(sessionUser));
+                addSavedAccount(data.user);
                 return sessionUser;
             }
         }
@@ -106,7 +109,83 @@ export const login = async (username: string, password: string): Promise<User | 
 
 export const logout = () => {
     localStorage.removeItem(CURRENT_USER_KEY);
+    localStorage.removeItem(RETURN_ACCOUNT_KEY);
     window.location.reload();
+};
+
+export const logoutForAccountSwitch = () => {
+    const current = getCurrentUser();
+    if (current) {
+        localStorage.setItem(RETURN_ACCOUNT_KEY, current.id);
+    }
+    localStorage.removeItem(CURRENT_USER_KEY);
+    window.location.reload();
+};
+
+export const getReturnAccountId = (): string | null => {
+    return localStorage.getItem(RETURN_ACCOUNT_KEY);
+};
+
+export const clearReturnAccount = () => {
+    localStorage.removeItem(RETURN_ACCOUNT_KEY);
+};
+
+// ============= MULTI-ACCOUNT SWITCHING =============
+
+export interface SavedAccount {
+    id: string;
+    username: string;
+    role: string;
+}
+
+export const getSavedAccounts = (): SavedAccount[] => {
+    try {
+        const stored = localStorage.getItem(SAVED_ACCOUNTS_KEY);
+        return stored ? JSON.parse(stored) : [];
+    } catch {
+        return [];
+    }
+};
+
+export const addSavedAccount = (user: User) => {
+    const accounts = getSavedAccounts();
+    const exists = accounts.find(a => a.id === user.id);
+    if (!exists) {
+        accounts.push({ id: user.id, username: user.username, role: user.role });
+        localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+    } else if (exists.username !== user.username || exists.role !== user.role) {
+        // Update if username/role changed
+        exists.username = user.username;
+        exists.role = user.role;
+        localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+    }
+};
+
+export const removeSavedAccount = (accountId: string) => {
+    const accounts = getSavedAccounts().filter(a => a.id !== accountId);
+    localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+};
+
+export const switchAccount = async (accountId: string): Promise<boolean> => {
+    try {
+        const res = await fetch('/api/users');
+        if (!res.ok) return false;
+        const users: User[] = await res.json();
+        const targetUser = users.find(u => u.id === accountId);
+        if (!targetUser) {
+            // User no longer exists, remove from saved
+            removeSavedAccount(accountId);
+            return false;
+        }
+        // Switch: save as current user (without password in session)
+        const sessionUser = { ...targetUser };
+        delete sessionUser.password;
+        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(sessionUser));
+        return true;
+    } catch (e) {
+        console.error('Switch account failed', e);
+        return false;
+    }
 };
 
 export const getCurrentUser = (): User | null => {
