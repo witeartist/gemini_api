@@ -284,23 +284,32 @@ router.get('/admin/stats', authMiddleware, (req, res, next) => {
 
                 const topLevel = await fs.readdir(logsDir, { withFileTypes: true });
 
+                const processEntry = (entry, dateStr) => {
+                    const tokens = entry.usageMetadata?.totalTokenCount || 0;
+                    const cost = entry.estimatedCost || 0;
+                    const model = entry.model || 'unknown';
+                    stats.users[userId].totalTokens += tokens;
+                    stats.users[userId].totalCost += cost;
+                    stats.users[userId].count += 1;
+                    if (!stats.timeline[dateStr]) stats.timeline[dateStr] = { tokens: 0, cost: 0, count: 0, models: {} };
+                    stats.timeline[dateStr].tokens += tokens;
+                    stats.timeline[dateStr].cost += cost;
+                    stats.timeline[dateStr].count += 1;
+                    if (!stats.timeline[dateStr].models[model]) stats.timeline[dateStr].models[model] = { count: 0, tokens: 0, cost: 0 };
+                    stats.timeline[dateStr].models[model].count += 1;
+                    stats.timeline[dateStr].models[model].tokens += tokens;
+                    stats.timeline[dateStr].models[model].cost += cost;
+                };
+
                 // Legacy files
                 const legacyFiles = topLevel.filter(d => d.isFile() && d.name.endsWith('.json'));
                 for (const fileEnt of legacyFiles) {
                     const dateStr = fileEnt.name.replace('.json', '');
                     try {
                         const entries = await fs.readJson(path.join(logsDir, fileEnt.name));
-                        if (!stats.timeline[dateStr]) stats.timeline[dateStr] = { tokens: 0, cost: 0, count: 0 };
                         const list = Array.isArray(entries) ? entries : [entries];
                         for (const entry of list) {
-                            const tokens = entry.usageMetadata?.totalTokenCount || 0;
-                            const cost = entry.estimatedCost || 0;
-                            stats.users[userId].totalTokens += tokens;
-                            stats.users[userId].totalCost += cost;
-                            stats.users[userId].count += 1;
-                            stats.timeline[dateStr].tokens += tokens;
-                            stats.timeline[dateStr].cost += cost;
-                            stats.timeline[dateStr].count += 1;
+                            processEntry(entry, dateStr);
                         }
                     } catch (e) { /* skip */ }
                 }
@@ -312,18 +321,10 @@ router.get('/admin/stats', authMiddleware, (req, res, next) => {
                     const folderPath = path.join(logsDir, dateStr);
                     try {
                         const jsonFiles = (await fs.readdir(folderPath)).filter(f => f.endsWith('.json'));
-                        if (!stats.timeline[dateStr]) stats.timeline[dateStr] = { tokens: 0, cost: 0, count: 0 };
                         for (const jf of jsonFiles) {
                             try {
                                 const entry = await fs.readJson(path.join(folderPath, jf));
-                                const tokens = entry.usageMetadata?.totalTokenCount || 0;
-                                const cost = entry.estimatedCost || 0;
-                                stats.users[userId].totalTokens += tokens;
-                                stats.users[userId].totalCost += cost;
-                                stats.users[userId].count += 1;
-                                stats.timeline[dateStr].tokens += tokens;
-                                stats.timeline[dateStr].cost += cost;
-                                stats.timeline[dateStr].count += 1;
+                                processEntry(entry, dateStr);
                             } catch (e) { /* skip */ }
                         }
                     } catch (e) { /* skip */ }

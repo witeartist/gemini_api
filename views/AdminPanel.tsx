@@ -34,6 +34,16 @@ const AdminPanel: React.FC = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 7;
 
+    // RUB conversion rate
+    const [rubRate, setRubRate] = useState<number>(() => {
+        const saved = localStorage.getItem('wite_ai_rub_rate');
+        return saved ? parseFloat(saved) : 95;
+    });
+    const [showRub, setShowRub] = useState<boolean>(() => localStorage.getItem('wite_ai_show_rub') === 'true');
+
+    // Expanded days for model breakdown
+    const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+
     // Server API Keys State
     const [serverKeys, setServerKeys] = useState<ServerApiKey[]>([]);
     const [skProvider, setSkProvider] = useState<ApiProvider>(ApiProvider.GOOGLE);
@@ -42,6 +52,48 @@ const AdminPanel: React.FC = () => {
     const [skAllowedUsers, setSkAllowedUsers] = useState<string[]>(['all']);
     const [skEditingId, setSkEditingId] = useState<string | null>(null);
     const [skShowKey, setSkShowKey] = useState(false);
+
+    // Collapsible sections — all collapsed by default
+    const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
+        new Set(['settings', 'users', 'presets', 'serverKeys', 'gallery', 'stats'])
+    );
+    const toggleSection = (section: string) => {
+        setCollapsedSections(prev => {
+            const next = new Set(prev);
+            if (next.has(section)) next.delete(section);
+            else next.add(section);
+            return next;
+        });
+    };
+
+    const toggleDay = (date: string) => {
+        setExpandedDays(prev => {
+            const next = new Set(prev);
+            next.has(date) ? next.delete(date) : next.add(date);
+            return next;
+        });
+    };
+
+    const formatModelName = (model: string): string => {
+        return model
+            .replace('gemini-', '')
+            .replace('-preview', '')
+            .replace('-image', ' Img');
+    };
+
+    const updateRubRate = (val: string) => {
+        const num = parseFloat(val);
+        if (!isNaN(num) && num > 0) {
+            setRubRate(num);
+            localStorage.setItem('wite_ai_rub_rate', String(num));
+        }
+    };
+
+    const toggleShowRub = () => {
+        const next = !showRub;
+        setShowRub(next);
+        localStorage.setItem('wite_ai_show_rub', String(next));
+    };
 
     useEffect(() => {
         loadData();
@@ -187,13 +239,6 @@ const AdminPanel: React.FC = () => {
         saveSystemSettings(newSettings);
     };
 
-    const handleApiProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newProvider = e.target.value as ApiProvider;
-        const newSettings = { ...systemSettings, apiProvider: newProvider };
-        setSystemSettings(newSettings);
-        saveSystemSettings(newSettings);
-    };
-
     const handleToggleExternalGalleryUser = (userId: string) => {
         const hiddenUsers = systemSettings.externalGalleryHiddenUsers || [];
         const nextHiddenUsers = hiddenUsers.includes(userId)
@@ -268,8 +313,10 @@ const AdminPanel: React.FC = () => {
 
     const toggleSkAllowedUser = (userId: string) => {
         setSkAllowedUsers(prev => {
-            // If toggling 'all', set to just ['all']
-            if (userId === 'all') return ['all'];
+            // Toggle 'all' on/off — when unchecking 'all', enable individual selection
+            if (userId === 'all') {
+                return prev.includes('all') ? [] : ['all'];
+            }
             // Remove 'all' if it was there when selecting specific users
             const withoutAll = prev.filter(u => u !== 'all');
             if (withoutAll.includes(userId)) {
@@ -284,31 +331,27 @@ const AdminPanel: React.FC = () => {
         <div className="space-y-8 pb-10">
              {/* System Settings Section */}
              <div className="bg-slate-800/50 backdrop-blur-sm p-6 rounded-2xl border border-slate-700">
-                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white mb-0 flex items-center gap-2 cursor-pointer select-none" onClick={() => toggleSection('settings')}>
                     <i className="fas fa-toggle-on text-emerald-500"></i>
                     {t('system_ui_config')}
+                    <i className={`fas fa-chevron-down text-xs text-slate-500 ml-auto transition-transform duration-200 ${collapsedSections.has('settings') ? '-rotate-90' : ''}`}></i>
                 </h2>
+                {!collapsedSections.has('settings') && (
+                <div className="mt-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                     {/* API Provider Setting */}
+                     {/* API Provider — auto-detected from selected server key */}
                      <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 flex justify-between items-center col-span-full">
                         <div>
                             <div className="text-white font-bold">🔌 API Provider</div>
                             <div className="text-xs text-slate-400">
-                                Choose between Google Gemini or NeuroAPI. <br/>
-                                <span className="text-amber-400">⚠️ Set the corresponding API key in your local storage: 
-                                    <code className="ml-1 text-emerald-400">gemini_api_key</code> or 
-                                    <code className="ml-1 text-emerald-400">neuroapi_api_key</code>
-                                </span>
+                                {t('api_provider_auto_desc') || 'Auto-detected from selected server key in user Settings'}
                             </div>
                         </div>
-                        <select 
-                            className="bg-slate-800 border-none rounded px-3 py-1 text-white text-sm outline-none cursor-pointer min-w-[160px]"
-                            value={systemSettings.apiProvider || ApiProvider.GOOGLE}
-                            onChange={handleApiProviderChange}
-                        >
-                            <option value={ApiProvider.GOOGLE}>Google Gemini</option>
-                            <option value={ApiProvider.NEUROAPI}>NeuroAPI</option>
-                        </select>
+                        <span className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 text-slate-300">
+                            {(systemSettings.apiProvider || ApiProvider.GOOGLE) === ApiProvider.GOOGLE 
+                                ? '🟢 Google Gemini' 
+                                : '🟣 NeuroAPI'}
+                        </span>
                      </div>
 
                      {/* Default Language Setting */}
@@ -423,14 +466,19 @@ const AdminPanel: React.FC = () => {
                         </div>
                      </div>
                 </div>
+                </div>
+                )}
              </div>
 
             {/* User Management Section */}
             <div className="bg-slate-800/50 backdrop-blur-sm p-6 rounded-2xl border border-slate-700">
-                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white mb-0 flex items-center gap-2 cursor-pointer select-none" onClick={() => toggleSection('users')}>
                     <i className="fas fa-users-cog text-blue-500"></i>
                     {t('user_management')}
+                    <i className={`fas fa-chevron-down text-xs text-slate-500 ml-auto transition-transform duration-200 ${collapsedSections.has('users') ? '-rotate-90' : ''}`}></i>
                 </h2>
+                {!collapsedSections.has('users') && (
+                <div className="mt-6">
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* User List */}
@@ -533,15 +581,19 @@ const AdminPanel: React.FC = () => {
                         </div>
                     </div>
                 </div>
+                </div>
+                )}
             </div>
 
             {/* Global Presets Management */}
             <div className="bg-slate-800/50 backdrop-blur-sm p-6 rounded-2xl border border-slate-700">
-                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white mb-0 flex items-center gap-2 cursor-pointer select-none" onClick={() => toggleSection('presets')}>
                     <i className="fas fa-list-alt text-purple-500"></i>
                     {t('global_presets')}
+                    <i className={`fas fa-chevron-down text-xs text-slate-500 ml-auto transition-transform duration-200 ${collapsedSections.has('presets') ? '-rotate-90' : ''}`}></i>
                 </h2>
-
+                {!collapsedSections.has('presets') && (
+                <div className="mt-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                      {/* Preset List */}
                      <div className="space-y-4">
@@ -602,14 +654,19 @@ const AdminPanel: React.FC = () => {
                          </div>
                     </div>
                 </div>
+                </div>
+                )}
             </div>
 
             {/* --- 4. Server API Keys Management --- */}
             <div className="bg-slate-800/50 backdrop-blur-sm p-6 rounded-2xl border border-slate-700">
-                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white mb-0 flex items-center gap-2 cursor-pointer select-none" onClick={() => toggleSection('serverKeys')}>
                     <i className="fas fa-server text-pink-500"></i>
                     {t('sk_title')}
+                    <i className={`fas fa-chevron-down text-xs text-slate-500 ml-auto transition-transform duration-200 ${collapsedSections.has('serverKeys') ? '-rotate-90' : ''}`}></i>
                 </h2>
+                {!collapsedSections.has('serverKeys') && (
+                <div className="mt-6">
                 <p className="text-xs text-slate-400 mb-6">{t('sk_description')}</p>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -757,14 +814,19 @@ const AdminPanel: React.FC = () => {
                         </div>
                     </div>
                 </div>
+                </div>
+                )}
             </div>
 
             {/* --- 5. Gallery Access Key --- */}
             <div className="bg-slate-800/50 backdrop-blur-sm p-6 rounded-2xl border border-slate-700">
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white mb-0 flex items-center gap-2 cursor-pointer select-none" onClick={() => toggleSection('gallery')}>
                     <i className="fas fa-globe text-emerald-500"></i>
                     🌐 {t('global_gallery_access')}
+                    <i className={`fas fa-chevron-down text-xs text-slate-500 ml-auto transition-transform duration-200 ${collapsedSections.has('gallery') ? '-rotate-90' : ''}`}></i>
                 </h2>
+                {!collapsedSections.has('gallery') && (
+                <div className="mt-4">
                 <div className="flex items-center gap-2">
                     <code className="flex-1 bg-slate-950 p-3 rounded-lg text-emerald-400 font-mono text-sm break-all select-all border border-slate-800">
                         {globalApiKey || "Loading..."}
@@ -774,16 +836,42 @@ const AdminPanel: React.FC = () => {
                     {t('api_key_desc')}<br/>
                     <span className="text-slate-400 font-mono">GET /api/external_gallery?key=YOUR_KEY</span>
                 </p>
+                </div>
+                )}
             </div>
 
              {/* Usage Statistics Classification */}
              {stats && (
                 <div className="bg-slate-800/50 backdrop-blur-sm p-6 rounded-2xl border border-slate-700">
-                    <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-white mb-0 flex items-center gap-2 cursor-pointer select-none" onClick={() => toggleSection('stats')}>
                         <i className="fas fa-chart-line text-amber-500"></i>
                         {t('usage_stats')}
+                        <i className={`fas fa-chevron-down text-xs text-slate-500 ml-auto transition-transform duration-200 ${collapsedSections.has('stats') ? '-rotate-90' : ''}`}></i>
                     </h2>
+                    {!collapsedSections.has('stats') && (
+                    <div className="mt-6">
                     
+                    {/* RUB conversion controls */}
+                    <div className="flex items-center gap-4 mb-4 bg-slate-900/50 p-3 rounded-xl border border-slate-700">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={showRub} onChange={toggleShowRub} className="sr-only peer" />
+                            <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500 relative"></div>
+                            <span className="text-xs text-slate-300 font-medium">₽ RUB</span>
+                        </label>
+                        {showRub && (
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500">{t('rub_rate')}:</span>
+                                <input 
+                                    type="number" 
+                                    value={rubRate} 
+                                    onChange={(e) => updateRubRate(e.target.value)} 
+                                    className="w-20 bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                    min="1" step="0.5"
+                                />
+                            </div>
+                        )}
+                    </div>
+
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div>
                              <h3 className="text-md font-bold text-slate-300 mb-3">{t('usage_by_user')}</h3>
@@ -803,7 +891,10 @@ const AdminPanel: React.FC = () => {
                                                 <td className="px-4 py-3 font-medium text-white">{uid}</td>
                                                 <td className="px-4 py-3">{s.count}</td>
                                                 <td className="px-4 py-3">{(s.totalTokens / 1000).toFixed(1)}k</td>
-                                                <td className="px-4 py-3">${s.totalCost.toFixed(4)}</td>
+                                                <td className="px-4 py-3">
+                                                    ${s.totalCost.toFixed(4)}
+                                                    {showRub && <span className="text-amber-400/60 ml-1 text-xs">({(s.totalCost * rubRate).toFixed(2)}₽)</span>}
+                                                </td>
                                             </tr>
                                         ))}
                                      </tbody>
@@ -818,13 +909,43 @@ const AdminPanel: React.FC = () => {
                                      .sort((a,b) => b[0].localeCompare(a[0]))
                                      .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
                                      .map(([date, s]: [string, any]) => (
-                                     <div key={date} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 flex justify-between items-center">
-                                         <div className="font-mono text-emerald-400">{date}</div>
-                                         <div className="flex gap-4 text-xs">
-                                             <span className="text-slate-400">{s.count} {t('gens')}</span>
-                                             <span className="text-blue-400">{(s.tokens/1000).toFixed(1)}k {t('tok')}</span>
-                                             <span className="text-amber-400 font-bold">${s.cost.toFixed(4)}</span>
-                                         </div>
+                                     <div key={date} className="bg-slate-900/50 rounded-lg border border-slate-700 overflow-hidden">
+                                         <button 
+                                             className="w-full p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors"
+                                             onClick={() => s.models && Object.keys(s.models).length > 0 ? toggleDay(date) : null}
+                                         >
+                                             <div className="font-mono text-emerald-400 flex items-center gap-2">
+                                                 {date}
+                                                 {s.models && Object.keys(s.models).length > 0 && (
+                                                     <i className={`fas fa-chevron-down text-[8px] text-slate-500 transition-transform duration-200 ${expandedDays.has(date) ? '' : '-rotate-90'}`}></i>
+                                                 )}
+                                             </div>
+                                             <div className="flex gap-4 text-xs">
+                                                 <span className="text-slate-400">{s.count} {t('gens')}</span>
+                                                 <span className="text-blue-400">{(s.tokens/1000).toFixed(1)}k {t('tok')}</span>
+                                                 <span className="text-amber-400 font-bold">
+                                                     ${s.cost.toFixed(4)}
+                                                     {showRub && <span className="font-normal text-amber-400/60 ml-1">({(s.cost * rubRate).toFixed(2)}₽)</span>}
+                                                 </span>
+                                             </div>
+                                         </button>
+                                         {/* Model breakdown */}
+                                         {expandedDays.has(date) && s.models && (
+                                             <div className="border-t border-slate-700/50 px-3 pb-2 pt-1">
+                                                 {Object.entries(s.models as Record<string, {count: number; tokens: number; cost: number}>)
+                                                     .sort(([,a]: any, [,b]: any) => b.count - a.count)
+                                                     .map(([model, m]: [string, any]) => (
+                                                     <div key={model} className="flex justify-between items-center py-1.5 text-[11px]">
+                                                         <span className="text-slate-400 font-mono">{formatModelName(model)}</span>
+                                                         <div className="flex gap-3">
+                                                             <span className="text-slate-500">{m.count}×</span>
+                                                             <span className="text-blue-400/70">{(m.tokens/1000).toFixed(1)}k</span>
+                                                             <span className="text-amber-400/70">${m.cost.toFixed(4)}</span>
+                                                         </div>
+                                                     </div>
+                                                 ))}
+                                             </div>
+                                         )}
                                      </div>
                                  ))}
                              </div>
@@ -855,6 +976,8 @@ const AdminPanel: React.FC = () => {
                              )}
                         </div>
                     </div>
+                    </div>
+                    )}
                 </div>
             )}
         </div>

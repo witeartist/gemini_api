@@ -39,7 +39,11 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [settings, setSettings] = useState(getSystemSettings());
     const [theme, setThemeState] = useState<AppTheme>(settings.theme || 'default');
-    const [newYearMode, setNewYearModeState] = useState<boolean>(settings.newYearMode || false);
+    const [newYearMode, setNewYearModeState] = useState<boolean>(() => {
+        const month = new Date().getMonth();
+        const isNewYearSeason = month >= 10 || month <= 1;
+        return (settings.newYearMode || false) && isNewYearSeason;
+    });
 
     // Load settings from user preferences or system settings
     useEffect(() => {
@@ -92,8 +96,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     const setNewYearMode = (enabled: boolean) => {
-        setNewYearModeState(enabled);
-        const newSettings = { ...getSystemSettings(), newYearMode: enabled };
+        // Only allow enabling during Nov 1 - Feb 28
+        const month = new Date().getMonth();
+        const isNewYearSeason = month >= 10 || month <= 1;
+        const resolvedEnabled = enabled && isNewYearSeason;
+        setNewYearModeState(resolvedEnabled);
+        const newSettings = { ...getSystemSettings(), newYearMode: resolvedEnabled };
         saveSystemSettings(newSettings);
     };
 

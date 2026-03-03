@@ -6,6 +6,7 @@ export enum ApiProvider {
 export enum ModelType {
     GEMINI_3_PRO = 'gemini-3-pro-preview',
     GEMINI_3_PRO_IMAGE = 'gemini-3-pro-image-preview',
+    GEMINI_3_1_PRO_IMAGE = 'gemini-3.1-pro-image-preview',
     GEMINI_3_1_FLASH_IMAGE = 'gemini-3.1-flash-image-preview',
     GEMINI_3_FLASH = 'gemini-3-flash-preview',
     GEMINI_2_5_FLASH_IMAGE = 'gemini-2.5-flash-image'
@@ -50,6 +51,7 @@ export interface ProcessingConfig {
     safetySettings?: SafetySetting[];
     useImageSearch?: boolean;
     useGoogleSearch?: boolean;
+    imageOnly?: boolean;
 }
 
 export interface BatchFile {

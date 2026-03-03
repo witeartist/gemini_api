@@ -6,11 +6,11 @@ import FileUploader from '../components/ui/FileUploader';
 import ImageViewer from '../components/ui/ImageViewer';
 import TextViewer from '../components/ui/TextViewer';
 import NumberStepper from '../components/ui/NumberStepper';
-import { generateContent, downloadBase64Image, downloadTextFile, fileToBase64, countTokens } from '../services/geminiService';
+import { generateContent, downloadBase64Image, downloadTextFile, fileToBase64, countTokens, estimateCostLocal, onRetryStatus } from '../services/geminiService';
 import { saveGeneration, getUserHistory, deleteGeneration } from '../services/historyService';
 import { getCurrentUser } from '../services/authService';
 import { ProcessingConfig, ModelType, HistoryItem } from '../types';
-import { MODELS, ASPECT_RATIOS, RESOLUTIONS, MODEL_PRICING, getAvailableResolutions } from '../constants';
+import { MODELS, ASPECT_RATIOS, RESOLUTIONS, MODEL_PRICING, getAvailableResolutions, getAvailableAspectRatios } from '../constants';
 import { useLanguage } from '../contexts/LanguageContext';
 import { usePresets } from '../hooks/usePresets';
 import { getSystemSettings, SystemSettings } from '../services/settingsService';
@@ -60,6 +60,19 @@ const SingleGenerator: React.FC = () => {
         return true;
     }), [config.model, t]);
     const [repeatCount, setRepeatCount] = useState<number>(1);
+
+    // Reset resolution & aspect ratio when model changes
+    useEffect(() => {
+        const availRes = getAvailableResolutions(config.model);
+        if (!availRes.some(r => r.value === config.resolution)) {
+            setConfig(prev => ({ ...prev, resolution: availRes[availRes.length - 1]?.value || '1K' }));
+        }
+        const availAr = getAvailableAspectRatios(config.model);
+        if (config.aspectRatio !== 'Auto' && !availAr.some(a => a.value === config.aspectRatio)) {
+            setConfig(prev => ({ ...prev, aspectRatio: 'Auto' }));
+        }
+    }, [config.model]);
+
     const [uiSettings, setUiSettings] = useState<SystemSettings>(getSystemSettings());
     
     // Runtime State
@@ -83,6 +96,14 @@ const SingleGenerator: React.FC = () => {
     // Token Estimate State
     const [isEstimating, setIsEstimating] = useState(false);
     const [tokenEstimate, setTokenEstimate] = useState<{ inputTokens: number; inputCost: number; estimatedImageCost: number; totalEstimatedCost: number } | null>(null);
+    const [estimateIsPrecise, setEstimateIsPrecise] = useState(false);
+
+    // RUB conversion
+    const rubRate = parseFloat(localStorage.getItem('wite_ai_rub_rate') || '95');
+    const showRub = localStorage.getItem('wite_ai_show_rub') === 'true';
+
+    // Retry notification state
+    const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxRetries: number; status: number; delay: number } | null>(null);
 
     // Recent History State
     const [recentHistory, setRecentHistory] = useState<HistoryItem[]>([]);
@@ -102,10 +123,18 @@ const SingleGenerator: React.FC = () => {
         return () => clearInterval(interval);
     }, [isProcessing]);
 
-    // Clear token estimate when config or images change
+    // Auto-compute local cost estimate when config/images/repeatCount change
     useEffect(() => {
-        setTokenEstimate(null);
-    }, [config, images]);
+        const estimate = estimateCostLocal(config, images.length, 0, repeatCount);
+        setTokenEstimate(estimate);
+        setEstimateIsPrecise(false);
+    }, [config, images.length, repeatCount]);
+
+    // Subscribe to retry status events
+    useEffect(() => {
+        const unsubscribe = onRetryStatus(setRetryInfo);
+        return unsubscribe;
+    }, []);
 
     // Load recent history and settings
     useEffect(() => {
@@ -204,12 +233,18 @@ const SingleGenerator: React.FC = () => {
 
     const handleEstimateCost = async () => {
         setIsEstimating(true);
-        setTokenEstimate(null);
         setError(null);
         try {
             const imageFiles = images.map(img => img.file);
             const estimate = await countTokens(config, imageFiles);
-            setTokenEstimate(estimate);
+            // Scale by repeatCount for precise estimate too
+            setTokenEstimate({
+                inputTokens: estimate.inputTokens * repeatCount,
+                inputCost: estimate.inputCost * repeatCount,
+                estimatedImageCost: estimate.estimatedImageCost * repeatCount,
+                totalEstimatedCost: estimate.totalEstimatedCost * repeatCount
+            });
+            setEstimateIsPrecise(true);
         } catch (e: any) {
             setError(t('estimate_error') + ': ' + (e?.message || String(e)));
         } finally {
@@ -392,37 +427,53 @@ const SingleGenerator: React.FC = () => {
                                     {t('stop_btn')}
                                 </button>
                             )}
-                            {/* Estimate cost button */}
-                            {!isProcessing && (
-                                <button
-                                    onClick={handleEstimateCost}
-                                    disabled={isEstimating}
-                                    className="w-full mt-2 bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 hover:text-white border border-slate-600/40 font-medium text-sm py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                                >
-                                    <i className={`fas ${isEstimating ? 'fa-spinner fa-spin' : 'fa-calculator'}`}></i>
-                                    {isEstimating ? t('estimating') : t('estimate_cost_btn')}
-                                </button>
-                            )}
-                            {/* Token estimate result */}
+                            {/* Token estimate result — auto-computed locally */}
                             {tokenEstimate && !isProcessing && (
                                 <div className="mt-2 bg-slate-800/40 border border-slate-700/40 rounded-xl px-4 py-3 text-xs space-y-1">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-slate-500 text-[10px] uppercase tracking-wider">
+                                            {estimateIsPrecise ? t('precise_estimate') : t('approx_estimate')}
+                                        </span>
+                                        {!estimateIsPrecise && !isEstimating && (
+                                            <button
+                                                onClick={handleEstimateCost}
+                                                className="text-[10px] text-theme-primary hover:text-theme-secondary transition-colors"
+                                            >
+                                                <i className="fas fa-crosshairs mr-1"></i>{t('precise_btn')}
+                                            </button>
+                                        )}
+                                        {isEstimating && (
+                                            <span className="text-[10px] text-amber-400">
+                                                <i className="fas fa-spinner fa-spin mr-1"></i>{t('estimating')}
+                                            </span>
+                                        )}
+                                    </div>
                                     <div className="flex justify-between text-slate-400">
                                         <span>{t('input_tokens')}</span>
                                         <span className="text-slate-200 font-mono">{tokenEstimate.inputTokens.toLocaleString()}</span>
                                     </div>
                                     <div className="flex justify-between text-slate-400">
                                         <span>{t('input_cost_label')}</span>
-                                        <span className="text-slate-200 font-mono">${tokenEstimate.inputCost.toFixed(6)}</span>
+                                        <span className="text-slate-200 font-mono">
+                                            ${tokenEstimate.inputCost.toFixed(6)}
+                                            {showRub && <span className="text-amber-400/70 ml-1">({(tokenEstimate.inputCost * rubRate).toFixed(2)} ₽)</span>}
+                                        </span>
                                     </div>
                                     {tokenEstimate.estimatedImageCost > 0 && (
                                         <div className="flex justify-between text-slate-400">
                                             <span>{t('image_cost_label')}</span>
-                                            <span className="text-slate-200 font-mono">${tokenEstimate.estimatedImageCost.toFixed(4)}</span>
+                                            <span className="text-slate-200 font-mono">
+                                                ${tokenEstimate.estimatedImageCost.toFixed(4)}
+                                                {showRub && <span className="text-amber-400/70 ml-1">({(tokenEstimate.estimatedImageCost * rubRate).toFixed(2)} ₽)</span>}
+                                            </span>
                                         </div>
                                     )}
                                     <div className="flex justify-between text-emerald-400 font-semibold border-t border-slate-700/40 pt-1 mt-1">
                                         <span>{t('total_estimated_cost')}</span>
-                                        <span className="font-mono">${tokenEstimate.totalEstimatedCost.toFixed(6)}</span>
+                                        <span className="font-mono">
+                                            ${tokenEstimate.totalEstimatedCost.toFixed(6)}
+                                            {showRub && <span className="text-amber-300 ml-1">({(tokenEstimate.totalEstimatedCost * rubRate).toFixed(2)} ₽)</span>}
+                                        </span>
                                     </div>
                                 </div>
                             )}
@@ -570,6 +621,28 @@ const SingleGenerator: React.FC = () => {
                                             </button>
                                         </div>
                                     )}
+                                    {config.model.includes('image') && (
+                                        <div className="shrink-0">
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('image_only_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, imageOnly: !prev.imageOnly }))}
+                                                className={`
+                                                    flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.imageOnly 
+                                                        ? 'bg-gradient-to-r from-purple-600 to-pink-500 text-white border-purple-400/50 shadow-lg shadow-purple-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    cursor-pointer
+                                                `}
+                                                title={t('image_only_tooltip')}
+                                            >
+                                                <i className={`fas fa-image ${config.imageOnly ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span className="whitespace-nowrap">{config.imageOnly ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -701,6 +774,26 @@ const SingleGenerator: React.FC = () => {
                                 </Button>
                             )}
                         </div>
+
+                        {/* Retry notification */}
+                        {retryInfo && isProcessing && (
+                            <div className="mx-4 p-3 bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-xl flex items-center gap-3 mb-4 animate-fade-in">
+                                <i className="fas fa-exclamation-circle text-amber-400 animate-pulse"></i>
+                                <div className="flex-1">
+                                    <span className="font-medium animate-pulse">
+                                        {retryInfo.status === 429
+                                            ? t('retry_rate_limit')
+                                            : retryInfo.status === 503
+                                            ? t('retry_unavailable')
+                                            : t('retry_server_error')}
+                                    </span>
+                                    <span className="text-amber-400/70 text-xs ml-2">
+                                        ({t('retry_attempt')} {retryInfo.attempt}/{retryInfo.maxRetries})
+                                    </span>
+                                </div>
+                                <i className="fas fa-spinner fa-spin text-amber-400 text-sm"></i>
+                            </div>
+                        )}
 
                         {error && (
                             <div className="mx-4 p-4 bg-red-500/10 border border-red-500/20 text-red-200 rounded-xl flex items-start gap-3 break-words mb-4 animate-fade-in">

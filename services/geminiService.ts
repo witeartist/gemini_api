@@ -9,6 +9,19 @@ import { getResolvedServerKey } from "./apiKeyService";
 
 export type { ImageProofMetadata } from "./imageProofService";
 
+// ========== Retry event system ==========
+type RetryListener = (info: { attempt: number; maxRetries: number; status: number; delay: number } | null) => void;
+const retryListeners = new Set<RetryListener>();
+
+export const onRetryStatus = (listener: RetryListener) => {
+    retryListeners.add(listener);
+    return () => { retryListeners.delete(listener); };
+};
+
+const emitRetryStatus = (info: { attempt: number; maxRetries: number; status: number; delay: number } | null) => {
+    retryListeners.forEach(fn => fn(info));
+};
+
 // ========== Retry with exponential backoff ==========
 const RETRYABLE_STATUS_CODES = [429, 500, 503];
 
@@ -21,21 +34,25 @@ const withRetry = async <T>(
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
             if (signal?.aborted) throw new Error("Aborted");
-            return await fn();
+            const result = await fn();
+            emitRetryStatus(null); // clear retry status on success
+            return result;
         } catch (error: any) {
-            if (signal?.aborted) throw error;
+            if (signal?.aborted) { emitRetryStatus(null); throw error; }
 
             const status = error?.status || error?.httpStatusCode || 0;
             const isRetryable = RETRYABLE_STATUS_CODES.includes(status) ||
                 (error.message && (error.message.includes('429') || error.message.includes('503')));
 
-            if (!isRetryable || attempt === maxRetries) throw error;
+            if (!isRetryable || attempt === maxRetries) { emitRetryStatus(null); throw error; }
 
             const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
             console.warn(`API retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms (status: ${status || 'unknown'})`);
+            emitRetryStatus({ attempt: attempt + 1, maxRetries, status, delay });
             await new Promise(r => setTimeout(r, delay));
         }
     }
+    emitRetryStatus(null);
     throw new Error('Max retries exceeded');
 };
 
@@ -51,9 +68,15 @@ const getCurrentUserId = (): string | null => {
 };
 
 const getApiKey = (): string => {
-    // 1. Check for server-managed key (selected by user, cached in sessionStorage)
-    const serverKey = getResolvedServerKey(ApiProvider.GOOGLE);
+    // 1. Check for server-managed key (check both providers — current provider first)
+    const provider = getApiProvider();
+    const serverKey = getResolvedServerKey(provider);
     if (serverKey) return serverKey.replace(/[^\x20-\x7E]/g, '').trim();
+    
+    // Also check the other provider (in case provider was auto-switched)
+    const otherProvider = provider === ApiProvider.GOOGLE ? ApiProvider.NEUROAPI : ApiProvider.GOOGLE;
+    const otherServerKey = getResolvedServerKey(otherProvider);
+    if (otherServerKey) return otherServerKey.replace(/[^\x20-\x7E]/g, '').trim();
 
     // 2. Check user-scoped localStorage key
     const currentUserId = getCurrentUserId();
@@ -81,7 +104,7 @@ const getGeminiClient = () => {
 const getModelFlags = (model: string) => {
     return {
         isImageModel: model.includes('image'),
-        isProImageModel: model === ModelType.GEMINI_3_PRO_IMAGE || model === ModelType.GEMINI_3_1_FLASH_IMAGE,
+        isProImageModel: model === ModelType.GEMINI_3_PRO_IMAGE || model === ModelType.GEMINI_3_1_PRO_IMAGE || model === ModelType.GEMINI_3_1_FLASH_IMAGE,
     };
 };
 
@@ -204,6 +227,48 @@ export const countTokens = async (
     };
 };
 
+/**
+ * Fast local cost pre-estimate — no API call, instant.
+ * Uses known average token counts per image (~260 tokens per 1MP image) and text (~1 token per 4 chars).
+ * Not as precise as countTokens API, but good enough for quick estimation.
+ */
+export const estimateCostLocal = (
+    config: ProcessingConfig,
+    imageCount: number,
+    textLength: number = 0,
+    requestCount: number = 1
+): { inputTokens: number; inputCost: number; estimatedImageCost: number; totalEstimatedCost: number } => {
+    const pricing = MODEL_PRICING[config.model];
+    if (!pricing) return { inputTokens: 0, inputCost: 0, estimatedImageCost: 0, totalEstimatedCost: 0 };
+
+    const { isImageModel } = getModelFlags(config.model);
+
+    // Estimate input tokens: ~260 tokens per image, ~1 token per 4 chars of text
+    const promptText = (config.systemPrompt || '') + (config.userPrompt || '');
+    const textTokens = Math.ceil((promptText.length + textLength) / 4);
+    const imageTokens = imageCount * 260;
+    const inputTokensPerReq = textTokens + imageTokens;
+    const totalInputTokens = inputTokensPerReq * requestCount;
+
+    const inputCost = totalInputTokens * (pricing.input || 0);
+
+    let estimatedImageCost = 0;
+    if (isImageModel) {
+        if (pricing.perImageByResolution && config.resolution) {
+            estimatedImageCost = (pricing.perImageByResolution[config.resolution] || pricing.perImage || 0) * requestCount;
+        } else {
+            estimatedImageCost = (pricing.perImage || 0) * requestCount;
+        }
+    }
+
+    return {
+        inputTokens: totalInputTokens,
+        inputCost,
+        estimatedImageCost,
+        totalEstimatedCost: inputCost + estimatedImageCost
+    };
+};
+
 export const generateContent = async (
     config: ProcessingConfig,
     imageFiles: File[],
@@ -276,15 +341,12 @@ const generateContentGoogle = async (
 
         if (isImageModel) {
               applyImageConfig(generateConfig, config, isProImageModel);
+              const modalities = config.imageOnly ? ['IMAGE'] : ['TEXT', 'IMAGE'];
             
             if (isProImageModel) {
-                 // Try enabling image modalities for Pro model too
-                 generateConfig.responseModalities = ['TEXT', 'IMAGE'];
-                 // Some versions might need explicit imagen tool or just the modality
-                 // generateConfig.tools = [{ googleSearch: {} }]; 
+                 generateConfig.responseModalities = modalities;
             } else {
-                 // ONLY set this for Image models, not generic text models
-                 generateConfig.responseModalities = ['TEXT', 'IMAGE'];
+                 generateConfig.responseModalities = modalities;
                  if (config.temperature !== undefined) {
                     generateConfig.temperature = config.temperature;
                  }
@@ -390,7 +452,7 @@ const sendChatMessageGoogle = async (
     }
 
     const isImageModel = effectiveModel.includes('image');
-    const isProImageModel = effectiveModel === ModelType.GEMINI_3_PRO_IMAGE || effectiveModel === ModelType.GEMINI_3_1_FLASH_IMAGE;
+    const isProImageModel = effectiveModel === ModelType.GEMINI_3_PRO_IMAGE || effectiveModel === ModelType.GEMINI_3_1_PRO_IMAGE || effectiveModel === ModelType.GEMINI_3_1_FLASH_IMAGE;
 
     // 2. Prepare History for SDK
     const sdkHistory = history.map(msg => {
@@ -417,7 +479,7 @@ const sendChatMessageGoogle = async (
     // 3. Configure Chat
     const chatConfig: any = {};
     if (isImageModel) {
-        chatConfig.responseModalities = ['TEXT', 'IMAGE'];
+        chatConfig.responseModalities = config.imageOnly ? ['IMAGE'] : ['TEXT', 'IMAGE'];
         if (isProImageModel) {
             chatConfig.tools = [{ googleSearch: {} }];
         }
@@ -647,8 +709,7 @@ export const createCloudBatchJob = async (fileResources: { uri: string, mimeType
 
          if (isImageModel) {
               applyImageConfig(generationConfig, config, isProImageModel);
-              // All image models need responseModalities to return images in batch
-              generationConfig.responseModalities = ['TEXT', 'IMAGE'];
+              generationConfig.responseModalities = config.imageOnly ? ['IMAGE'] : ['TEXT', 'IMAGE'];
          }
 
          const requestBody: any = { 

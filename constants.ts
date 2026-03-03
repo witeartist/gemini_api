@@ -2,7 +2,7 @@
 import { ModelType, HarmCategory, HarmBlockThreshold, MediaResolution } from "./types";
 
 export const MODELS = [
-    { value: ModelType.GEMINI_3_PRO, label: '3 Pro ⚠️ deprecated', provider: 'google' },
+    { value: ModelType.GEMINI_3_1_PRO_IMAGE, label: '3.1 Pro Image', provider: 'google' },
     { value: ModelType.GEMINI_3_PRO_IMAGE, label: '3 Pro Image (Nano Banana Pro)', provider: 'google' },
     { value: ModelType.GEMINI_3_1_FLASH_IMAGE, label: '3.1 Flash Image (Nano Banana 2)', provider: 'google' },
     { value: ModelType.GEMINI_3_FLASH, label: '3 Flash', provider: 'google' },
@@ -11,8 +11,13 @@ export const MODELS = [
 
 export const MODEL_PRICING: {[key: string]: { input: number, output: number, perImage?: number, perImageByResolution?: {[res: string]: number} }} = {
     // Pricing per 1 token (Standard API)
-    // Gemini 3 Pro: $2 / $12 per 1M tokens — DEPRECATED Mar 9 2026
+    // Gemini 3 Pro: $2 / $12 per 1M tokens — DEPRECATED Mar 9 2026 (kept for legacy logs)
     [ModelType.GEMINI_3_PRO]: { input: 0.000002, output: 0.000012 }, 
+    
+    // Gemini 3.1 Pro Image: $2 input, $12 text output, $120/1M image output tokens
+    [ModelType.GEMINI_3_1_PRO_IMAGE]: { input: 0.000002, output: 0.000012, perImage: 0.134,
+        perImageByResolution: { '1K': 0.134, '2K': 0.134, '4K': 0.24 }
+    },
     
     // Gemini 3 Pro Image (Nano Banana Pro): $2 input, $12 text output, $120/1M image output tokens
     // 1K/2K = 1120 tokens = $0.134, 4K = 2000 tokens = $0.24
@@ -23,7 +28,7 @@ export const MODEL_PRICING: {[key: string]: { input: number, output: number, per
     // Gemini 3.1 Flash Image (Nano Banana 2): $0.50 input, $3 text output, $60/1M image output tokens
     // 512px = 747 tokens = $0.045, 1K = 1120 = $0.067, 2K = 1680 = $0.101, 4K = 2520 = $0.151
     [ModelType.GEMINI_3_1_FLASH_IMAGE]: { input: 0.0000005, output: 0.000003, perImage: 0.067,
-        perImageByResolution: { '512px': 0.045, '1K': 0.067, '2K': 0.101, '4K': 0.151 }
+        perImageByResolution: { '512': 0.045, '1K': 0.067, '2K': 0.101, '4K': 0.151 }
     },
     
     // Gemini 3 Flash: $0.50 (Input) / $3 (Output) per 1M tokens
@@ -52,7 +57,7 @@ export const ASPECT_RATIOS = [
 ];
 
 export const RESOLUTIONS = [
-    { value: '512px', label: '512px (0.5K)' },
+    { value: '512', label: '512px (0.5K)' },
     { value: '1K', label: '1K (1024x1024)' },
     { value: '2K', label: '2K (2048x2048)' },
     { value: '4K', label: '4K (4096x4096)' },
@@ -91,8 +96,8 @@ export const getAvailableResolutions = (model: ModelType) => {
     if (model === ModelType.GEMINI_3_1_FLASH_IMAGE) {
         return RESOLUTIONS; // all including 512px
     }
-    // Pro Image: 1K, 2K, 4K (no 512px)
-    return RESOLUTIONS.filter(r => r.value !== '512px');
+    // Pro Image models: 1K, 2K, 4K (no 512px)
+    return RESOLUTIONS.filter(r => r.value !== '512');
 };
 
 export const getAvailableAspectRatios = (model: ModelType) => {

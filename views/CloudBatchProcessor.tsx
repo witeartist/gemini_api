@@ -549,7 +549,7 @@ const CloudBatchProcessor: React.FC = () => {
             if (mode === 'image') {
                 const promptsForBatch = parsedPrompts.length > 0 ? parsedPrompts : [''];
                 const copiesPerPrompt = Math.max(1, generationsPerPrompt || 1);
-                const isProImageModel = config.model === ModelType.GEMINI_3_PRO_IMAGE || config.model === ModelType.GEMINI_3_1_FLASH_IMAGE;
+                const isProImageModel = config.model === ModelType.GEMINI_3_PRO_IMAGE || config.model === ModelType.GEMINI_3_1_PRO_IMAGE || config.model === ModelType.GEMINI_3_1_FLASH_IMAGE;
                 const isImageModel = config.model.includes('image');
                 const uploadedResources: { uri: string, mimeType: string, originalName: string }[] = [];
 
@@ -585,7 +585,7 @@ const CloudBatchProcessor: React.FC = () => {
                             generationConfig.imageConfig.imageSize = config.resolution;
                         }
                         // All image models need responseModalities for batch
-                        generationConfig.responseModalities = ['TEXT', 'IMAGE'];
+                        generationConfig.responseModalities = config.imageOnly ? ['IMAGE'] : ['TEXT', 'IMAGE'];
                     }
                     return generationConfig;
                 };
@@ -1120,7 +1120,7 @@ const CloudBatchProcessor: React.FC = () => {
 
         // Resolution (for image mode with pro models)
         if (mode === 'image') {
-            const isProImageModel = config.model === ModelType.GEMINI_3_PRO_IMAGE || config.model === ModelType.GEMINI_3_1_FLASH_IMAGE;
+            const isProImageModel = config.model === ModelType.GEMINI_3_PRO_IMAGE || config.model === ModelType.GEMINI_3_1_PRO_IMAGE || config.model === ModelType.GEMINI_3_1_FLASH_IMAGE;
             if (isProImageModel && config.resolution) {
                 parts.push(config.resolution);
             }

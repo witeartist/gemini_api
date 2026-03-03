@@ -11,6 +11,7 @@ import { initEncryption } from './utils/encryption.js';
 
 // Middleware
 import { generalLimiter } from './middleware/rateLimit.js';
+import { initSessions } from './middleware/auth.js';
 
 // Routes
 import filesRouter from './routes/files.js';
@@ -118,6 +119,9 @@ if (fs.existsSync(DIST_DIR)) {
 // Initialize encryption and migrate keys
 initEncryption(DATA_DIR);
 migrateKeysEncryption(DATA_DIR).catch(e => logger.error('Key migration error', { error: e.message }));
+
+// Initialize persistent sessions
+initSessions(DATA_DIR).catch(e => logger.error('Session init error', { error: e.message }));
 
 const server = app.listen(PORT, () => {
     logger.info('Server started', { port: PORT, dataDir: DATA_DIR });

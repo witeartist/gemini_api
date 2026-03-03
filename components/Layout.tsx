@@ -7,7 +7,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { logout, logoutForAccountSwitch, getCurrentUser, getSavedAccounts, switchAccount, removeSavedAccount, SavedAccount } from '../services/authService';
 import { getSystemSettings, saveSystemSettings } from '../services/settingsService';
 import { SAFETY_CATEGORIES, SAFETY_THRESHOLDS, MEDIA_RESOLUTIONS_OPTIONS } from '../constants';
-import { getAvailableKeysByProvider, selectServerKey, clearSelectedServerKey, getSelectedServerKeyId } from '../services/apiKeyService';
+import { getAvailableServerKeys, selectServerKey, clearSelectedServerKey, getSelectedServerKeyId } from '../services/apiKeyService';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -27,10 +27,17 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
     const otherAccounts = savedAccounts.filter(a => a.id !== user?.id);
 
     const handleSwitchAccount = async (account: SavedAccount) => {
+        // Try token-based switch first (no password needed)
+        const success = await switchAccount(account.id);
+        if (success) {
+            window.location.reload();
+            return;
+        }
+        // Token expired — prompt for password
         const password = window.prompt(`${t('enter_password_for')} ${account.username}:`);
         if (!password) return;
-        const success = await switchAccount(account.id, password);
-        if (success) {
+        const loginSuccess = await switchAccount(account.id, password);
+        if (loginSuccess) {
             window.location.reload();
         } else {
             alert(t('switch_account_failed'));
@@ -81,18 +88,21 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
         setMediaResolution(getSystemSettings().mediaResolution);
 
         if (showSettings) {
-            // Load available server keys when settings modal opens
+            // Load all available server keys (both providers) when settings modal opens
             setLoadingKeys(true);
-            getAvailableKeysByProvider(ApiProvider.GOOGLE).then(keys => {
+            getAvailableServerKeys().then(allKeys => {
+                const keys = allKeys.filter(k => k.enabled);
                 setAvailableServerKeys(keys);
-                const currentSelectedId = getSelectedServerKeyId(ApiProvider.GOOGLE);
+                // Check for currently selected key across both providers
+                const googleSelected = getSelectedServerKeyId(ApiProvider.GOOGLE);
+                const neuroSelected = getSelectedServerKeyId(ApiProvider.NEUROAPI);
+                const currentSelectedId = googleSelected || neuroSelected;
                 if (currentSelectedId && keys.some(k => k.id === currentSelectedId)) {
                     setSelectedKeyId(currentSelectedId);
                     setUseOwnKey(false);
                 } else if (keys.length === 0) {
                     setUseOwnKey(true);
                 } else {
-                    // If user has a local key set but server keys are available, default to server
                     const hasLocalKey = !!(scopedKey || legacyKey);
                     setUseOwnKey(hasLocalKey && !currentSelectedId);
                 }
@@ -106,6 +116,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
         if (useOwnKey || availableServerKeys.length === 0) {
             // Using own key - clear server selection, save to localStorage
             clearSelectedServerKey(ApiProvider.GOOGLE);
+            clearSelectedServerKey(ApiProvider.NEUROAPI);
             let cleanKey = apiKey;
             const scopedStorageKey = getUserScopedGeminiKeyStorageKey();
             if (cleanKey) {
@@ -122,11 +133,27 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
                 }
             }
         } else if (selectedKeyId) {
-            // Using server key - select it (fetches and caches the actual key)
-            const success = await selectServerKey(selectedKeyId, ApiProvider.GOOGLE);
+            // Using server key — auto-detect provider from the key
+            const selectedKey = availableServerKeys.find(k => k.id === selectedKeyId);
+            const keyProvider = selectedKey?.provider === 'neuroapi' ? ApiProvider.NEUROAPI : ApiProvider.GOOGLE;
+            
+            // Clear the OTHER provider's selection, set the correct one
+            if (keyProvider === ApiProvider.GOOGLE) {
+                clearSelectedServerKey(ApiProvider.NEUROAPI);
+            } else {
+                clearSelectedServerKey(ApiProvider.GOOGLE);
+            }
+            
+            const success = await selectServerKey(selectedKeyId, keyProvider);
             if (!success) {
                 alert(t('sk_select_failed'));
                 return;
+            }
+
+            // Auto-set API provider based on selected key's provider
+            const currentSysSettings = getSystemSettings();
+            if (currentSysSettings.apiProvider !== keyProvider) {
+                saveSystemSettings({ ...currentSysSettings, apiProvider: keyProvider });
             }
         }
 
@@ -157,6 +184,16 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
     const getThresholdForCategory = (category: HarmCategory) => {
         const setting = safetySettings.find(s => s.category === category);
         return setting ? setting.threshold : HarmBlockThreshold.HARM_BLOCK_THRESHOLD_UNSPECIFIED;
+    };
+
+    // Settings panel collapsible sections
+    const [collapsedSettings, setCollapsedSettings] = useState<Set<string>>(new Set());
+    const toggleSettingsSection = (section: string) => {
+        setCollapsedSettings(prev => {
+            const next = new Set(prev);
+            next.has(section) ? next.delete(section) : next.add(section);
+            return next;
+        });
     };
 
     const handleOpenAdmin = () => {
@@ -368,262 +405,236 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
                 </div>
             </main>
 
-            {/* Settings Modal */}
-            {showSettings && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md animate-fade-in p-4">
-                    <div className="bg-slate-900 border border-slate-700/50 p-8 rounded-3xl w-full max-w-lg shadow-2xl relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-theme-primary blur-3xl rounded-full pointer-events-none opacity-20"></div>
-
-                        <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-theme-primary">
+            {/* Settings Slide-out Panel */}
+            <div 
+                className={`fixed inset-0 z-[100] transition-all duration-300 ${showSettings ? 'visible' : 'invisible pointer-events-none'}`}
+            >
+                {/* Backdrop */}
+                <div 
+                    className={`absolute inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity duration-300 ${showSettings ? 'opacity-100' : 'opacity-0'}`}
+                    onClick={() => setShowSettings(false)}
+                />
+                
+                {/* Panel */}
+                <div className={`absolute right-0 top-0 h-full w-full max-w-md bg-slate-900 border-l border-slate-700/50 shadow-2xl flex flex-col transition-transform duration-300 ease-out ${showSettings ? 'translate-x-0' : 'translate-x-full'}`}>
+                    {/* Header with language toggle */}
+                    <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-800 shrink-0">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-theme-primary">
                                 <i className="fas fa-cog"></i>
                             </div>
-                            {t('settings_title')}
-                        </h2>
-                        
-                        <div className="space-y-6 mb-8">
-                            {/* API Key Section */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 ml-1">
-                                    {t('api_key_label')}
-                                </label>
-                                
-                                {loadingKeys ? (
-                                    <div className="text-center py-4 text-slate-500 text-sm">
-                                        <i className="fas fa-spinner fa-spin mr-2"></i>{t('loading')}...
-                                    </div>
-                                ) : availableServerKeys.length > 0 ? (
-                                    /* Server keys available - show selector */
-                                    <div className="space-y-2">
-                                        {availableServerKeys.map(sk => (
-                                            <label key={sk.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                                                !useOwnKey && selectedKeyId === sk.id 
-                                                    ? 'bg-theme-primary/10 border-theme-primary/50' 
-                                                    : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
-                                            }`}>
-                                                <input
-                                                    type="radio"
-                                                    name="api-key-source"
-                                                    checked={!useOwnKey && selectedKeyId === sk.id}
-                                                    onChange={() => { setSelectedKeyId(sk.id); setUseOwnKey(false); }}
-                                                    className="sr-only peer"
-                                                />
-                                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                                                    !useOwnKey && selectedKeyId === sk.id 
-                                                        ? 'border-theme-primary' 
-                                                        : 'border-slate-500'
-                                                }`}>
-                                                    {!useOwnKey && selectedKeyId === sk.id && (
-                                                        <div className="w-2 h-2 rounded-full bg-theme-primary"></div>
-                                                    )}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-sm font-medium text-white flex items-center gap-2">
-                                                        <i className="fas fa-server text-xs text-slate-500"></i>
-                                                        {sk.label}
-                                                    </div>
-                                                    <div className="text-[10px] text-slate-500 font-mono">{sk.maskedKey}</div>
-                                                </div>
-                                                <span className={`text-[10px] px-2 py-0.5 rounded ${sk.provider === 'google' ? 'bg-blue-900/50 text-blue-300' : 'bg-purple-900/50 text-purple-300'}`}>
-                                                    {sk.provider === 'google' ? 'Gemini' : 'NeuroAPI'}
-                                                </span>
-                                            </label>
-                                        ))}
-                                        
-                                        {/* Own key option */}
-                                        <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                                            useOwnKey 
-                                                ? 'bg-theme-primary/10 border-theme-primary/50' 
-                                                : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
-                                        }`}>
-                                            <input
-                                                type="radio"
-                                                name="api-key-source"
-                                                checked={useOwnKey}
-                                                onChange={() => setUseOwnKey(true)}
-                                                className="sr-only peer"
-                                            />
-                                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                                                useOwnKey ? 'border-theme-primary' : 'border-slate-500'
-                                            }`}>
-                                                {useOwnKey && <div className="w-2 h-2 rounded-full bg-theme-primary"></div>}
-                                            </div>
-                                            <div className="flex-1">
-                                                <div className="text-sm font-medium text-white flex items-center gap-2">
-                                                    <i className="fas fa-key text-xs text-slate-500"></i>
-                                                    {t('sk_use_own_key')}
-                                                </div>
-                                            </div>
-                                        </label>
-                                        
-                                        {useOwnKey && (
-                                            <input 
-                                                id="api-key-input"
-                                                name="api-key"
-                                                type="password" 
-                                                className="w-full bg-slate-800/50 border border-slate-700 text-slate-100 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-theme-primary/50 focus:border-theme-primary outline-none transition-all placeholder-slate-600 mt-2"
-                                                placeholder={t('sk_enter_own_key')}
-                                                value={apiKey}
-                                                onChange={(e) => setApiKey(e.target.value)}
-                                            />
-                                        )}
-                                    </div>
-                                ) : (
-                                    /* No server keys - show plain text input */
-                                    <input 
-                                        id="api-key-input"
-                                        name="api-key"
-                                        type="password" 
-                                        className="w-full bg-slate-800/50 border border-slate-700 text-slate-100 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-theme-primary/50 focus:border-theme-primary outline-none transition-all placeholder-slate-600"
-                                        placeholder="Paste your Gemini API Key here..."
-                                        value={apiKey}
-                                        onChange={(e) => setApiKey(e.target.value)}
-                                    />
-                                )}
-                            </div>
-
-                            {/* Global Safety Settings */}
-                            <div className="bg-slate-800/30 p-4 rounded-xl border border-slate-700/50">
-                                <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
-                                    <i className="fas fa-shield-alt text-theme-secondary"></i>
-                                    {t('safety_settings_title')}
-                                </h3>
-                                <p className="text-xs text-slate-500 mb-4">{t('safety_desc')} (Global)</p>
-                                
-                                <div className="space-y-3">
-                                    {SAFETY_CATEGORIES.map(category => (
-                                        <div key={category.value} className="grid grid-cols-2 gap-4 items-center">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                                {category.label}
-                                            </label>
-                                            <select
-                                                className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-primary"
-                                                value={getThresholdForCategory(category.value)}
-                                                onChange={(e) => updateSafetySetting(category.value, e.target.value)}
-                                            >
-                                                {SAFETY_THRESHOLDS.map(th => (
-                                                    <option key={th.value} value={th.value}>{th.label}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Media Resolution */}
-                            <div className="bg-slate-800/30 p-4 rounded-xl border border-slate-700/50">
-                                <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
-                                    <i className="fas fa-eye text-blue-400"></i>
-                                    {t('media_res_title')}
-                                </h3>
-                                <p className="text-xs text-slate-500 mb-4">{t('media_res_desc')} (Gemini 3)</p>
-                                <select 
-                                    className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-theme-primary"
-                                    value={mediaResolution}
-                                    onChange={(e) => setMediaResolution(e.target.value as MediaResolution)}
+                            <h2 className="text-lg font-bold text-white">{t('settings_title')}</h2>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            {/* Compact Language Slider */}
+                            <div className="flex bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
+                                <button 
+                                    onClick={() => setLanguage('en')}
+                                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${language === 'en' ? 'bg-theme-primary text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
                                 >
-                                    {MEDIA_RESOLUTIONS_OPTIONS.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </select>
+                                    EN
+                                </button>
+                                <button 
+                                    onClick={() => setLanguage('ru')}
+                                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${language === 'ru' ? 'bg-theme-primary text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                                >
+                                    RU
+                                </button>
                             </div>
-
-                            {/* Language Switcher */}
-                            <div>
-                                <label htmlFor="language-select" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
-                                    {t('language_label')}
-                                </label>
-                                <div className="flex bg-slate-800 rounded-xl p-1 border border-slate-700/50">
-                                    <button 
-                                        onClick={() => setLanguage('en')}
-                                        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${language === 'en' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
-                                    >
-                                        English
-                                    </button>
-                                    <button 
-                                        onClick={() => setLanguage('ru')}
-                                        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${language === 'ru' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
-                                    >
-                                        Русский
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            {/* Theme Selector */}
-                            <div>
-                                <fieldset>
-                                <legend className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
-                                    {t('appearance')}
-                                </legend>
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button 
-                                        onClick={() => setTheme('default')}
-                                        className={`py-2 rounded-xl text-xs font-bold border transition-all ${theme === 'default' ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
-                                    >
-                                        <i className="fas fa-circle text-[10px] mr-1 text-blue-300"></i> {t('theme_purple')}
-                                    </button>
-                                    <button 
-                                        onClick={() => setTheme('raspberry')}
-                                        className={`py-2 rounded-xl text-xs font-bold border transition-all ${theme === 'raspberry' ? 'bg-pink-600 border-pink-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
-                                    >
-                                        <i className="fas fa-circle text-[10px] mr-1 text-pink-300"></i> {t('theme_raspberry')}
-                                    </button>
-                                    <button 
-                                        onClick={() => setTheme('green')}
-                                        className={`py-2 rounded-xl text-xs font-bold border transition-all ${theme === 'green' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
-                                    >
-                                        <i className="fas fa-circle text-[10px] mr-1 text-emerald-300"></i> {t('theme_green')}
-                                    </button>
-                                </div>
-                                </fieldset>
-                            </div>
-
-                            {/* New Year Mode Toggle */}
-                            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex justify-between items-center">
-                                <div>
-                                    <div className="text-white font-bold flex items-center gap-2">
-                                        {t('new_year_mode')} <i className="fas fa-snowflake text-sky-400 animate-pulse"></i>
-                                    </div>
-                                    <div className="text-xs text-slate-400">{t('new_year_desc')}</div>
-                                </div>
-                                <label htmlFor="new-year-toggle" className="relative inline-flex items-center cursor-pointer">
-                                    <input 
-                                        id="new-year-toggle"
-                                        name="new-year-mode"
-                                        type="checkbox" 
-                                        className="sr-only peer"
-                                        checked={newYearMode}
-                                        onChange={(e) => setNewYearMode(e.target.checked)}
-                                    />
-                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-theme-primary"></div>
-                                </label>
-                            </div>
-
-                             {/* Admin Panel Link */}
-                            {user?.role === 'admin' && (
-                                <div className="pt-2 border-t border-slate-800">
-                                    <button 
-                                        onClick={handleOpenAdmin}
-                                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-purple-900/20 text-purple-400 hover:bg-purple-900/40 border border-purple-500/30 transition-all font-bold text-sm"
-                                    >
-                                        <i className="fas fa-user-shield"></i>
-                                        {t('open_admin_panel')}
-                                    </button>
+                            <button 
+                                onClick={() => setShowSettings(false)} 
+                                className="w-8 h-8 rounded-lg hover:bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white transition-all"
+                            >
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {/* Scrollable content */}
+                    <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 space-y-3">
+                        
+                        {/* API Key Section */}
+                        <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 overflow-hidden">
+                            <button 
+                                className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-800/30 transition-colors"
+                                onClick={() => toggleSettingsSection('apiKey')}
+                            >
+                                <i className="fas fa-key text-theme-primary text-sm w-5 text-center"></i>
+                                <span className="text-sm font-bold text-white flex-1">{t('api_key_label')}</span>
+                                <i className={`fas fa-chevron-down text-[10px] text-slate-500 transition-transform duration-200 ${collapsedSettings.has('apiKey') ? '-rotate-90' : ''}`}></i>
+                            </button>
+                            {!collapsedSettings.has('apiKey') && (
+                                <div className="px-4 pb-4 pt-0">
+                                    {loadingKeys ? (
+                                        <div className="text-center py-4 text-slate-500 text-sm">
+                                            <i className="fas fa-spinner fa-spin mr-2"></i>{t('loading')}...
+                                        </div>
+                                    ) : availableServerKeys.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {availableServerKeys.map(sk => (
+                                                <label key={sk.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                                                    !useOwnKey && selectedKeyId === sk.id 
+                                                        ? 'bg-theme-primary/10 border-theme-primary/50' 
+                                                        : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                                                }`}>
+                                                    <input type="radio" name="api-key-source" checked={!useOwnKey && selectedKeyId === sk.id} onChange={() => { setSelectedKeyId(sk.id); setUseOwnKey(false); }} className="sr-only peer" />
+                                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${!useOwnKey && selectedKeyId === sk.id ? 'border-theme-primary' : 'border-slate-500'}`}>
+                                                        {!useOwnKey && selectedKeyId === sk.id && <div className="w-2 h-2 rounded-full bg-theme-primary"></div>}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-medium text-white flex items-center gap-2">
+                                                            <i className="fas fa-server text-xs text-slate-500"></i>
+                                                            {sk.label}
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-500 font-mono">{sk.maskedKey}</div>
+                                                    </div>
+                                                    <span className={`text-[10px] px-2 py-0.5 rounded ${sk.provider === 'google' ? 'bg-blue-900/50 text-blue-300' : 'bg-purple-900/50 text-purple-300'}`}>
+                                                        {sk.provider === 'google' ? 'Gemini' : 'NeuroAPI'}
+                                                    </span>
+                                                </label>
+                                            ))}
+                                            <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${useOwnKey ? 'bg-theme-primary/10 border-theme-primary/50' : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'}`}>
+                                                <input type="radio" name="api-key-source" checked={useOwnKey} onChange={() => setUseOwnKey(true)} className="sr-only peer" />
+                                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${useOwnKey ? 'border-theme-primary' : 'border-slate-500'}`}>
+                                                    {useOwnKey && <div className="w-2 h-2 rounded-full bg-theme-primary"></div>}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="text-sm font-medium text-white flex items-center gap-2">
+                                                        <i className="fas fa-key text-xs text-slate-500"></i>
+                                                        {t('sk_use_own_key')}
+                                                    </div>
+                                                </div>
+                                            </label>
+                                            {useOwnKey && (
+                                                <input id="api-key-input" name="api-key" type="password" className="w-full bg-slate-800/50 border border-slate-700 text-slate-100 rounded-xl px-4 py-3 focus:ring-2 focus:ring-theme-primary/50 focus:border-theme-primary outline-none transition-all placeholder-slate-600 mt-2" placeholder={t('sk_enter_own_key')} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <input id="api-key-input" name="api-key" type="password" className="w-full bg-slate-800/50 border border-slate-700 text-slate-100 rounded-xl px-4 py-3 focus:ring-2 focus:ring-theme-primary/50 focus:border-theme-primary outline-none transition-all placeholder-slate-600" placeholder="Paste your Gemini API Key here..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                                    )}
                                 </div>
                             )}
                         </div>
 
-                        <div className="flex justify-end gap-3 sticky bottom-0 bg-slate-900/95 py-2">
-                            <Button variant="secondary" onClick={() => setShowSettings(false)}>
-                                {t('cancel')}
-                            </Button>
-                            <Button variant="primary" onClick={saveSettings}>
-                                {t('save')}
-                            </Button>
+                        {/* Safety Settings Section */}
+                        <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 overflow-hidden">
+                            <button 
+                                className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-800/30 transition-colors"
+                                onClick={() => toggleSettingsSection('safety')}
+                            >
+                                <i className="fas fa-shield-alt text-theme-secondary text-sm w-5 text-center"></i>
+                                <div className="flex-1">
+                                    <span className="text-sm font-bold text-white">{t('safety_settings_title')}</span>
+                                    <p className="text-[10px] text-slate-500">{t('safety_desc')} (Global)</p>
+                                </div>
+                                <i className={`fas fa-chevron-down text-[10px] text-slate-500 transition-transform duration-200 ${collapsedSettings.has('safety') ? '-rotate-90' : ''}`}></i>
+                            </button>
+                            {!collapsedSettings.has('safety') && (
+                                <div className="px-4 pb-4 space-y-3">
+                                    {SAFETY_CATEGORIES.map(category => (
+                                        <div key={category.value} className="grid grid-cols-2 gap-4 items-center">
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{category.label}</label>
+                                            <select className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-primary" value={getThresholdForCategory(category.value)} onChange={(e) => updateSafetySetting(category.value, e.target.value)}>
+                                                {SAFETY_THRESHOLDS.map(th => <option key={th.value} value={th.value}>{th.label}</option>)}
+                                            </select>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
+
+                        {/* Media Resolution Section */}
+                        <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 overflow-hidden">
+                            <button 
+                                className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-800/30 transition-colors"
+                                onClick={() => toggleSettingsSection('mediaRes')}
+                            >
+                                <i className="fas fa-eye text-blue-400 text-sm w-5 text-center"></i>
+                                <div className="flex-1">
+                                    <span className="text-sm font-bold text-white">{t('media_res_title')}</span>
+                                    <p className="text-[10px] text-slate-500">{t('media_res_desc')} (Gemini 3)</p>
+                                </div>
+                                <i className={`fas fa-chevron-down text-[10px] text-slate-500 transition-transform duration-200 ${collapsedSettings.has('mediaRes') ? '-rotate-90' : ''}`}></i>
+                            </button>
+                            {!collapsedSettings.has('mediaRes') && (
+                                <div className="px-4 pb-4">
+                                    <select className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-theme-primary" value={mediaResolution} onChange={(e) => setMediaResolution(e.target.value as MediaResolution)}>
+                                        {MEDIA_RESOLUTIONS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                    </select>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Appearance Section */}
+                        <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 overflow-hidden">
+                            <button 
+                                className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-800/30 transition-colors"
+                                onClick={() => toggleSettingsSection('appearance')}
+                            >
+                                <i className="fas fa-palette text-purple-400 text-sm w-5 text-center"></i>
+                                <span className="text-sm font-bold text-white flex-1">{t('appearance')}</span>
+                                <i className={`fas fa-chevron-down text-[10px] text-slate-500 transition-transform duration-200 ${collapsedSettings.has('appearance') ? '-rotate-90' : ''}`}></i>
+                            </button>
+                            {!collapsedSettings.has('appearance') && (
+                                <div className="px-4 pb-4 space-y-4">
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button onClick={() => setTheme('default')} className={`py-2 rounded-xl text-xs font-bold border transition-all ${theme === 'default' ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
+                                            <i className="fas fa-circle text-[10px] mr-1 text-blue-300"></i> {t('theme_purple')}
+                                        </button>
+                                        <button onClick={() => setTheme('raspberry')} className={`py-2 rounded-xl text-xs font-bold border transition-all ${theme === 'raspberry' ? 'bg-pink-600 border-pink-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
+                                            <i className="fas fa-circle text-[10px] mr-1 text-pink-300"></i> {t('theme_raspberry')}
+                                        </button>
+                                        <button onClick={() => setTheme('green')} className={`py-2 rounded-xl text-xs font-bold border transition-all ${theme === 'green' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
+                                            <i className="fas fa-circle text-[10px] mr-1 text-emerald-300"></i> {t('theme_green')}
+                                        </button>
+                                    </div>
+
+                                    {/* New Year Mode Toggle — only available Nov 1 through Feb 28 */}
+                                    {(() => {
+                                        const month = new Date().getMonth();
+                                        const isNewYearSeason = month >= 10 || month <= 1;
+                                        return isNewYearSeason ? (
+                                            <div className="flex justify-between items-center bg-slate-800/50 p-3 rounded-xl border border-slate-700">
+                                                <div>
+                                                    <div className="text-sm text-white font-bold flex items-center gap-2">
+                                                        {t('new_year_mode')} <i className="fas fa-snowflake text-sky-400 animate-pulse text-xs"></i>
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-400">{t('new_year_desc')}</div>
+                                                </div>
+                                                <label htmlFor="new-year-toggle" className="relative inline-flex items-center cursor-pointer">
+                                                    <input id="new-year-toggle" name="new-year-mode" type="checkbox" className="sr-only peer" checked={newYearMode} onChange={(e) => setNewYearMode(e.target.checked)} />
+                                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-theme-primary"></div>
+                                                </label>
+                                            </div>
+                                        ) : null;
+                                    })()}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Admin Panel Link */}
+                        {user?.role === 'admin' && (
+                            <button 
+                                onClick={handleOpenAdmin}
+                                className="w-full flex items-center gap-3 p-4 rounded-xl bg-purple-900/20 text-purple-400 hover:bg-purple-900/40 border border-purple-500/30 transition-all font-bold text-sm"
+                            >
+                                <i className="fas fa-user-shield w-5 text-center"></i>
+                                {t('open_admin_panel')}
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Footer buttons */}
+                    <div className="flex gap-3 px-6 py-4 border-t border-slate-800 shrink-0">
+                        <Button variant="secondary" className="flex-1" onClick={() => setShowSettings(false)}>
+                            {t('cancel')}
+                        </Button>
+                        <Button variant="primary" className="flex-1" onClick={saveSettings}>
+                            {t('save')}
+                        </Button>
                     </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 };

@@ -1,13 +1,14 @@
 
 import { Preset } from '../hooks/usePresets';
+import { apiFetch } from './apiFetch';
 
 const API_BASE = '/api';
 
 export const presetsService = {
-    // Get all presets (public)
+    // Get all presets
     async getAll(): Promise<Preset[]> {
         try {
-            const response = await fetch(`${API_BASE}/presets`);
+            const response = await apiFetch(`${API_BASE}/presets`);
             if (!response.ok) {
                 throw new Error('Failed to fetch presets');
             }
@@ -21,7 +22,7 @@ export const presetsService = {
     // Save preset (admin only)
     async save(name: string, content: string, userId: string): Promise<{ success: boolean; presets?: Preset[] }> {
         try {
-            const response = await fetch(`${API_BASE}/presets`, {
+            const response = await apiFetch(`${API_BASE}/presets`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -44,22 +45,20 @@ export const presetsService = {
     // Delete preset (admin only)
     async delete(name: string, userId: string): Promise<{ success: boolean; presets?: Preset[] }> {
         try {
-            // Use query param for name AND userId (some servers strip body on DELETE)
             const params = new URLSearchParams({
                 name: name,
                 userId: userId
             });
             
-            const response = await fetch(`${API_BASE}/presets?${params.toString()}`, {
+            const response = await apiFetch(`${API_BASE}/presets?${params.toString()}`, {
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ userId }), // Keep body for standard compliance
+                body: JSON.stringify({ userId }),
             });
             
             if (!response.ok) {
-                // Try to parse JSON, but handle HTML errors (404/500) gracefully
                 let errorMessage = 'Failed to delete preset';
                 try {
                     const error = await response.json();

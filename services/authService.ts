@@ -1,5 +1,5 @@
 import { User, ModelType } from "../types";
-import { apiFetch, setAuthToken, clearAuthToken } from "./apiFetch";
+import { apiFetch, getAuthToken, setAuthToken, clearAuthToken } from "./apiFetch";
 
 const USERS_KEY = 'wite_ai_users';
 const CURRENT_USER_KEY = 'wite_ai_current_user';
@@ -144,6 +144,7 @@ export interface SavedAccount {
     id: string;
     username: string;
     role: string;
+    token?: string;
 }
 
 export const getSavedAccounts = (): SavedAccount[] => {
@@ -156,15 +157,18 @@ export const getSavedAccounts = (): SavedAccount[] => {
 };
 
 export const addSavedAccount = (user: User) => {
+    const currentToken = getAuthToken();
     const accounts = getSavedAccounts();
     const exists = accounts.find(a => a.id === user.id);
     if (!exists) {
-        accounts.push({ id: user.id, username: user.username, role: user.role });
+        accounts.push({ id: user.id, username: user.username, role: user.role, token: currentToken || undefined });
         localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
-    } else if (exists.username !== user.username || exists.role !== user.role) {
-        exists.username = user.username;
-        exists.role = user.role;
-        localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+    } else {
+        let changed = false;
+        if (exists.username !== user.username) { exists.username = user.username; changed = true; }
+        if (exists.role !== user.role) { exists.role = user.role; changed = true; }
+        if (currentToken && exists.token !== currentToken) { exists.token = currentToken; changed = true; }
+        if (changed) localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
     }
 };
 
@@ -173,41 +177,48 @@ export const removeSavedAccount = (accountId: string) => {
     localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
 };
 
-// 2.8: switchAccount now requires password (re-login through server)
+// 2.8: switchAccount — try saved token first (no password needed), fall back to password
 export const switchAccount = async (accountId: string, password?: string): Promise<boolean> => {
     try {
-        // Check if this is "return to admin" case
-        const returnId = getReturnAccountId();
-        
-        if (returnId && returnId === accountId && password) {
-            // Re-login as the target user
-            const accounts = getSavedAccounts();
-            const account = accounts.find(a => a.id === accountId);
-            if (!account) {
-                removeSavedAccount(accountId);
-                return false;
-            }
-            
-            const user = await login(account.username, password);
-            if (user) {
-                clearReturnAccount();
-                return true;
-            }
-            return false;
-        }
-        
-        if (!password) return false;
-        
-        // Normal switch: need to login as target user
         const accounts = getSavedAccounts();
         const account = accounts.find(a => a.id === accountId);
         if (!account) {
             removeSavedAccount(accountId);
             return false;
         }
+
+        // Try to use saved token (no password prompt needed)
+        if (account.token) {
+            try {
+                const res = await fetch('/api/system-settings', {
+                    headers: { 'Authorization': `Bearer ${account.token}` }
+                });
+                if (res.ok) {
+                    // Token is still valid — switch instantly
+                    setAuthToken(account.token);
+                    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify({
+                        id: account.id,
+                        username: account.username,
+                        role: account.role,
+                        allowedModels: ['all']
+                    }));
+                    return true;
+                }
+            } catch (_) { /* ignore, fall through to password login */ }
+            // Token expired, clear it
+            account.token = undefined;
+            localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+        }
+
+        // Fall back to password login
+        if (!password) return false;
         
         const user = await login(account.username, password);
-        return !!user;
+        if (user) {
+            clearReturnAccount();
+            return true;
+        }
+        return false;
     } catch (e) {
         console.error('Switch account failed', e);
         return false;

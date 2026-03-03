@@ -1,9 +1,48 @@
 import crypto from 'crypto';
+import fs from 'fs-extra';
+import path from 'path';
 import logger from '../utils/logger.js';
 
 // ========== Session Management ==========
 const activeSessions = new Map(); // token -> { userId, role, expiresAt }
-const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days (extended for convenience)
+let sessionsFilePath = null;
+let saveTimeout = null;
+
+// Initialize session file path and load persisted sessions
+export const initSessions = async (dataDir) => {
+    sessionsFilePath = path.join(dataDir, 'sessions.json');
+    try {
+        if (await fs.pathExists(sessionsFilePath)) {
+            const data = await fs.readJson(sessionsFilePath);
+            const now = Date.now();
+            let loaded = 0;
+            for (const [token, session] of Object.entries(data)) {
+                if (session.expiresAt > now) {
+                    activeSessions.set(token, session);
+                    loaded++;
+                }
+            }
+            if (loaded > 0) logger.info('Loaded persisted sessions', { count: loaded });
+        }
+    } catch (e) {
+        logger.error('Failed to load sessions file', { error: e.message });
+    }
+};
+
+// Debounced save to disk
+const saveSessionsToDisk = () => {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+        if (!sessionsFilePath) return;
+        try {
+            const obj = Object.fromEntries(activeSessions);
+            await fs.writeJson(sessionsFilePath, obj, { spaces: 2 });
+        } catch (e) {
+            logger.error('Failed to persist sessions', { error: e.message });
+        }
+    }, 500);
+};
 
 export const createSession = (userId, role) => {
     const token = crypto.randomBytes(32).toString('hex');
@@ -12,11 +51,13 @@ export const createSession = (userId, role) => {
         role,
         expiresAt: Date.now() + SESSION_TTL
     });
+    saveSessionsToDisk();
     return token;
 };
 
 export const deleteSession = (token) => {
     activeSessions.delete(token);
+    saveSessionsToDisk();
 };
 
 export const getSession = (token) => {
@@ -33,7 +74,10 @@ setInterval(() => {
             cleaned++;
         }
     }
-    if (cleaned > 0) logger.info('Cleaned expired sessions', { count: cleaned });
+    if (cleaned > 0) {
+        logger.info('Cleaned expired sessions', { count: cleaned });
+        saveSessionsToDisk();
+    }
 }, 60 * 60 * 1000);
 
 // ========== PBKDF2 Password Hashing ==========

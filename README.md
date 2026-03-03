@@ -1,191 +1,109 @@
 <div align="center">
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+
+# Wite AI — Gemini Image Studio
+
+**Генерация изображений и текста через Google Gemini API**
+
+[![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+
 </div>
 
-# Wite AI — Gemini Image Generator
+---
 
-Полнофункциональное веб-приложение для генерации изображений и текста через Google Gemini API / NeuroAPI.
+## ✨ Возможности
 
-**Архитектура:**
-- 🎨 **Фронтенд:** React + TypeScript + Tailwind CSS (собирается в статический SPA через Vite)
-- 🔙 **Бэкенд:** Node.js + Express 5 (REST API, сессии, шифрование)
-- 💾 **Хранилище:** Файловая система (JSON логи + PNG изображения + миниатюры)
-- 🔐 **Безопасность:** PBKDF2 хэширование паролей, AES-256 шифрование API ключей, rate limiting, CORS
-- 🖼️ **Миниатюры:** Автоматическая генерация через sharp (300px)
+### 🖼️ Генерация изображений
+- **Модели:** Gemini 3.1 Pro Image, 3.1 Flash Image, 2.5 Flash Image
+- **Разрешение:** 512px → 4K (4096×4096)
+- **15 пропорций:** от 1:1 до 8:1, включая нестандартные
+- **Image Only режим** — принудительная генерация изображения без текста
+- **Оценка стоимости** — мгновенный локальный подсчёт + точный через API
+
+### ⚡ Пакетная обработка
+- **Local Batch** — массовая генерация с очередью и повторами
+- **Cloud Batch** — отправка заданий в Google Batch API (50% скидка)
+- **Мульти-промпт** — несколько промптов через `;` разделитель
+- **Предварительная оценка стоимости** батча перед запуском
+
+### 💬 Чат
+- Мультимодальный диалог с AI (текст + изображения)
+- История чата с пагинацией
+
+### 🖼️ Галерея
+- Хронология генераций с миниатюрами
+- Сравнение «до/после» (input vs output)
+- **Внешняя галерея** — публичный API для показа изображений
+
+### 🛡️ Безопасность
+- PBKDF2 хеширование паролей (100K итераций)
+- AES-256 шифрование серверных API ключей
+- Bearer-токены, rate limiting, защита от path traversal
+
+### 🎨 Интерфейс
+- Тёмная тема с 3 цветовыми схемами
+- Двуязычный (EN / RU)
+- Slide-out панель настроек
+- Адаптивный дизайн
+
+---
 
 ## 🚀 Быстрый старт
 
-### Локальная разработка
-
 ```bash
-# Установка зависимостей
 npm install
-
-# Запуск (Node.js сервер + Vite dev server)
 npm run dev
-
-# Открыть http://localhost:3000 (фронтенд)
-# API доступен на http://localhost:3001/api/
+# → http://localhost:3000
 ```
 
-### Продакшен (сервер с Nginx)
+### Production
 
 ```bash
-# 1. Сборка фронтенда
 npm run build
-
-# 2. Создание архива для деплоя
-# PowerShell:
-Compress-Archive -Path dist, server, package.json, package-lock.json -DestinationPath deploy.zip -Force
-# bash:
-zip -r deploy.zip dist/ server/ package.json package-lock.json
-
-# 3. На сервере:
-unzip deploy.zip -d /var/www/site/
-cd /var/www/site
-npm install --production
+# Загрузить dist/ + server/ + package.json на сервер
 pm2 start server/index.js --name gemini-api
 ```
 
-Подробнее: [FAQ/Deploy Archive](FAQ/Deploy%20Archive)
+---
 
-## 📋 Требования
+## 🏗️ Архитектура
 
-- **Node.js** 18+
-- **npm** 8+
-- **Nginx** (production, проксирует `/api/` в Node.js)
-- **PM2** (production, менеджер процессов)
+| Слой | Технологии |
+|------|-----------|
+| **Frontend** | React 19 + TypeScript + Tailwind CSS + Vite |
+| **Backend** | Node.js + Express 5 (REST API) |
+| **Storage** | Файловая система (JSON + PNG + миниатюры через sharp) |
+| **Auth** | PBKDF2 + Bearer-токены + AES-256 |
 
-## 📁 Структура проекта
-
-```
-.
-├── server/                 # Node.js бэкенд (Express 5)
-│   ├── index.js           # Точка входа, middleware, маршруты
-│   ├── middleware/
-│   │   ├── auth.js        # Сессии, PBKDF2, Bearer-токены
-│   │   └── rateLimit.js   # Rate limiting (200 req/min)
-│   ├── routes/
-│   │   ├── files.js       # Отдача изображений (CORS для внешней галереи)
-│   │   ├── gallery.js     # Внешняя галерея API (/api/external_gallery)
-│   │   ├── history.js     # CRUD истории генераций + thumbnails
-│   │   ├── users.js       # Пользователи, логин, PBKDF2 миграция
-│   │   ├── settings.js    # Системные настройки
-│   │   ├── serverKeys.js  # API ключи провайдеров (AES-256)
-│   │   ├── presets.js     # Пресеты генерации
-│   │   ├── cloudJobs.js   # Cloud Batch задания
-│   │   ├── userPreferences.js
-│   │   └── userSettings.js
-│   └── utils/
-│       ├── encryption.js  # AES-256-CBC шифрование
-│       ├── thumbnail.js   # Генерация миниатюр (sharp)
-│       ├── validation.js  # Валидация входных данных
-│       ├── logger.js      # Структурированное логирование
-│       └── mergeJobs.js   # Слияние batch-заданий
-├── views/                  # React страницы
-│   ├── SingleGenerator.tsx # Генерация одного изображения
-│   ├── BatchProcessor.tsx  # Пакетная генерация
-│   ├── CloudBatchProcessor.tsx
-│   ├── GalleryView.tsx    # Галерея с пагинацией
-│   ├── AdminPanel.tsx     # Панель администратора
-│   └── LoginView.tsx
-├── services/               # Фронтенд-сервисы
-│   ├── geminiService.ts   # Google Gemini API клиент
-│   ├── neuroApiService.ts # NeuroAPI клиент
-│   ├── authService.ts     # Аутентификация (Bearer token)
-│   ├── historyService.ts  # История генераций
-│   └── settingsService.ts # Настройки
-├── components/             # React UI компоненты
-├── contexts/               # React контексты (язык, тема)
-├── hooks/                  # React хуки (пресеты)
-├── dist/                   # Собранный фронтенд (после npm run build)
-├── data/                   # Пользовательские данные (НЕ в git!)
-├── package.json
-├── vite.config.ts
-└── tsconfig.json
-```
-
-## 🛠️ Команды
-
-| Команда            | Описание                                     |
-|--------------------|----------------------------------------------|
-| `npm run dev`      | Запуск dev-сервера (Node.js + Vite)          |
-| `npm run build`    | Сборка для продакшена                        |
-| `npm run preview`  | Просмотр собранного приложения               |
-
-## 🌐 API Endpoints
-
-### Публичные
-```
-POST   /api/login                    # Аутентификация
-GET    /api/system-settings          # Системные настройки (тема, язык)
-GET    /api/files/:userId/*          # Файлы (изображения, миниатюры)
-GET    /api/external_gallery?key=... # Внешняя галерея (по API ключу)
-```
-
-### Авторизованные (Bearer token)
-```
-POST   /api/save                     # Сохранить генерацию
-GET    /api/history/:userId          # История пользователя
-DELETE /api/history/:userId/:id      # Удалить запись
-
-GET    /api/settings/:userId         # Настройки пользователя
-POST   /api/settings/:userId         # Сохранить настройки
-
-GET    /api/user-preferences/:userId # Предпочтения пользователя
-POST   /api/user-preferences/:userId # Сохранить предпочтения
-
-GET    /api/cloud-jobs/:userId       # Cloud Batch задания
-POST   /api/cloud-jobs/:userId       # Сохранить задания
-
-GET    /api/presets                   # Пресеты
-POST   /api/presets                   # Создать пресет
-DELETE /api/presets/:name             # Удалить пресет
-```
-
-### Только для администратора
-```
-GET    /api/users                    # Список пользователей
-POST   /api/users                    # Создать/обновить пользователя
-DELETE /api/users/:userId            # Удалить пользователя
-
-GET    /api/key                      # API ключ внешней галереи
-POST   /api/system-settings         # Обновить системные настройки
-
-GET    /api/server-keys              # API ключи провайдеров
-POST   /api/server-keys              # Добавить ключ
-DELETE /api/server-keys/:id          # Удалить ключ
-POST   /api/server-keys/:id/toggle   # Включить/выключить ключ
-
-GET    /api/admin/stats              # Статистика использования
-```
-
-Документация внешней галереи: [FAQ/Gallery API](FAQ/Gallery%20API)
-
-## 🔐 Безопасность
-
-- **Пароли** — PBKDF2 (100K итераций, SHA-256) с автоматической миграцией с SHA-256
-- **API ключи** — AES-256-CBC шифрование, ключ в `data/.encryption_key`
-- **Сессии** — Bearer-токены, 24ч TTL, автоочистка
-- **Rate limiting** — 200 req/min общий, 15 req/15min на логин
-- **CORS** — отключён в production (same-origin), включён для внешней галереи
-- **Валидация** — проверка userId, защита от path traversal
-- **trust proxy** — корректный IP за Nginx
-
-## ⚙️ Переменные окружения
-
-| Переменная            | По умолчанию              | Описание                    |
-|-----------------------|---------------------------|-----------------------------|
-| `PORT`                | `3001`                    | Порт Node.js сервера        |
-| `DATA_DIR`            | `./data`                  | Директория данных            |
-| `NODE_ENV`            | —                         | `production` для продакшена  |
-| `KEY_ENCRYPTION_SECRET` | авто из файла          | Ключ шифрования API ключей   |
+---
 
 ## 📖 Документация
 
-- [FAQ/Gallery API](FAQ/Gallery%20API) — Внешняя галерея: эндпоинты, примеры, troubleshooting
-- [FAQ/Deploy Archive](FAQ/Deploy%20Archive) — Сборка и деплой: чеклист, структура архива, Nginx
+| Документ | Описание |
+|----------|----------|
+| [API Reference](docs/API.md) | Все эндпоинты, форматы запросов/ответов |
+| [Deployment](docs/DEPLOYMENT.md) | Nginx, PM2, Docker, SSL, бекапы |
+| [Configuration](docs/CONFIGURATION.md) | Модели, провайдеры, настройки генерации, структура проекта |
+| [Security](docs/SECURITY.md) | Пароли, шифрование, CORS, rate limiting |
+| [Changelog](FAQ/changelog/CHANGELOG.md) | История изменений |
 
-## 📝 Лицензия
+---
 
-MIT
+## 📋 Команды
+
+| Команда | Описание |
+|---------|----------|
+| `npm run dev` | Dev-сервер (Node.js + Vite HMR) |
+| `npm run build` | Сборка для production |
+| `npm run preview` | Предпросмотр сборки |
+
+---
+
+<div align="center">
+
+**MIT License** · Made with Gemini API
+
+</div>

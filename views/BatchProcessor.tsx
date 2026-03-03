@@ -6,9 +6,9 @@ import FileUploader from '../components/ui/FileUploader';
 import ImageViewer from '../components/ui/ImageViewer';
 import CompareViewer from '../components/ui/CompareViewer';
 import NumberStepper from '../components/ui/NumberStepper';
-import { generateContent, downloadBase64Image, fileToText } from '../services/geminiService';
+import { generateContent, downloadBase64Image, fileToText, estimateCostLocal } from '../services/geminiService';
 import { ProcessingConfig, ModelType, BatchFile, BatchTextGroup } from '../types';
-import { MODELS, RESOLUTIONS, ASPECT_RATIOS, MODEL_PRICING, getAvailableResolutions } from '../constants';
+import { MODELS, RESOLUTIONS, ASPECT_RATIOS, MODEL_PRICING, getAvailableResolutions, getAvailableAspectRatios } from '../constants';
 import { useLanguage } from '../contexts/LanguageContext';
 import { usePresets } from '../hooks/usePresets';
 import { saveGeneration } from '../services/historyService';
@@ -40,6 +40,18 @@ const BatchProcessor: React.FC = () => {
         aspectRatio: 'Auto',
         resolution: '4K'
     });
+
+    // Reset resolution & aspect ratio when model changes
+    useEffect(() => {
+        const availRes = getAvailableResolutions(config.model);
+        if (!availRes.some(r => r.value === config.resolution)) {
+            setConfig(prev => ({ ...prev, resolution: availRes[availRes.length - 1]?.value || '1K' }));
+        }
+        const availAr = getAvailableAspectRatios(config.model);
+        if (config.aspectRatio !== 'Auto' && !availAr.some(a => a.value === config.aspectRatio)) {
+            setConfig(prev => ({ ...prev, aspectRatio: 'Auto' }));
+        }
+    }, [config.model]);
 
     const translatedAspectRatios = useMemo(() => [
         { value: 'Auto', label: t('ar_auto') },
@@ -537,6 +549,13 @@ const BatchProcessor: React.FC = () => {
     const localImageRequestsEstimate = files.filter(f => f.status === 'pending' || f.status === 'failed').length * promptsCount * Math.max(1, generationsPerPrompt || 1);
     const localTextGroupsEstimate = (pendingTextFiles.length > 0 ? Math.ceil(pendingTextFiles.length / Math.max(1, filesPerRequest)) : 0) * promptsCount;
 
+    const totalRequests = mode === 'image' ? localImageRequestsEstimate : localTextGroupsEstimate;
+    const batchCostEstimate = useMemo(() => {
+        return estimateCostLocal(config, mode === 'image' ? 1 : 0, 0, totalRequests);
+    }, [config, mode, totalRequests]);
+    const rubRate = parseFloat(localStorage.getItem('wite_ai_rub_rate') || '95');
+    const showRub = localStorage.getItem('wite_ai_show_rub') === 'true';
+
     return (
         <div className="space-y-8 relative max-w-7xl mx-auto pb-12">
             {viewingImage && (
@@ -671,6 +690,28 @@ const BatchProcessor: React.FC = () => {
                                             </button>
                                         </div>
                                     )}
+                                    {config.model.includes('image') && (
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 ml-1">
+                                                {t('image_only_label')}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig(prev => ({ ...prev, imageOnly: !prev.imageOnly }))}
+                                                className={`
+                                                    w-full max-w-[280px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border
+                                                    ${config.imageOnly 
+                                                        ? 'bg-gradient-to-r from-purple-600 to-pink-500 text-white border-purple-400/50 shadow-lg shadow-purple-500/20' 
+                                                        : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:border-slate-600 hover:text-slate-300'}
+                                                    cursor-pointer
+                                                `}
+                                                title={t('image_only_tooltip')}
+                                            >
+                                                <i className={`fas fa-image ${config.imageOnly ? 'text-white' : 'text-slate-500'}`}></i>
+                                                <span>{config.imageOnly ? 'ON' : 'OFF'}</span>
+                                            </button>
+                                        </div>
+                                    )}
                                 </>
                             )}
 
@@ -781,6 +822,12 @@ const BatchProcessor: React.FC = () => {
                                 <span className="px-2 py-1 rounded-md border border-slate-700 bg-slate-800/80 text-slate-300">
                                     {t('cloud_summary_requests')}: <strong className="text-white">{mode === 'image' ? localImageRequestsEstimate : localTextGroupsEstimate}</strong>
                                 </span>
+                                {batchCostEstimate.totalEstimatedCost > 0 && (
+                                    <span className="px-2 py-1 rounded-md border border-emerald-700/40 bg-emerald-900/20 text-emerald-300 font-mono text-xs">
+                                        ≈ ${batchCostEstimate.totalEstimatedCost.toFixed(4)}
+                                        {showRub && <span className="text-amber-300 ml-1">({(batchCostEstimate.totalEstimatedCost * rubRate).toFixed(2)} ₽)</span>}
+                                    </span>
+                                )}
                                 <span className={`px-2 py-1 rounded-md border ${!hasItemsToProcess ? 'border-amber-700/50 bg-amber-900/20 text-amber-300' : 'border-emerald-700/50 bg-emerald-900/20 text-emerald-300'}`}>
                                     {!hasItemsToProcess ? t('cloud_not_ready_badge') : t('cloud_ready_badge')}
                                 </span>
